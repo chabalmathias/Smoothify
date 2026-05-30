@@ -1,12 +1,15 @@
-<p align="left">
+<p align="center">
   <img src="https://raw.githubusercontent.com/DPIRD-DMA/Smoothify/main/images/smoothify_logo.png" alt="Smoothify Text" width="600">
 </p>
 
-[![Python Version](https://img.shields.io/badge/python-3.10%2B-blue)](https://www.python.org/downloads/)
-[![License](https://img.shields.io/badge/license-MIT-green)](https://github.com/DPIRD-DMA/Smoothify/blob/main/LICENSE)
-[![PyPI version](https://img.shields.io/pypi/v/smoothify.svg)](https://pypi.org/project/smoothify/)
-[![Conda version](https://img.shields.io/conda/vn/conda-forge/smoothify.svg)](https://anaconda.org/conda-forge/smoothify)
-[![Tutorials](https://img.shields.io/badge/Tutorials-Learn-brightgreen)](https://github.com/DPIRD-DMA/Smoothify/tree/main/examples)
+<p align="center">
+  <a href="https://www.python.org/downloads/"><img src="https://img.shields.io/badge/python-3.10%2B-blue" alt="Python Version"></a>
+  <a href="https://github.com/DPIRD-DMA/Smoothify/blob/main/LICENSE"><img src="https://img.shields.io/badge/license-MIT-green" alt="License"></a>
+  <a href="https://pypi.org/project/smoothify/"><img src="https://img.shields.io/pypi/v/smoothify.svg" alt="PyPI version"></a>
+  <a href="https://pepy.tech/projects/smoothify"><img src="https://static.pepy.tech/badge/smoothify" alt="PyPI downloads"></a>
+  <a href="https://anaconda.org/conda-forge/smoothify"><img src="https://img.shields.io/conda/vn/conda-forge/smoothify.svg" alt="Conda version"></a>
+  <a href="https://github.com/DPIRD-DMA/Smoothify/tree/main/examples"><img src="https://img.shields.io/badge/Tutorials-Learn-brightgreen" alt="Tutorials"></a>
+</p>
 
 📋 [View Changelog](https://github.com/DPIRD-DMA/Smoothify/blob/main/CHANGELOG.md)
 
