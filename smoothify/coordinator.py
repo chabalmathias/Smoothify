@@ -84,6 +84,11 @@ def smoothify(
     - Lists of geometries or GeometryCollections
     - GeoDataFrames
 
+    Invalid geometries (e.g. self-intersecting polygons) are not smoothed:
+    each one is returned unchanged with a warning, regardless of how it is
+    passed in. Repair them first with shapely's ``make_valid()`` (or
+    ``GeoSeries.make_valid()`` for a GeoDataFrame) if you want them smoothed.
+
     Args:
         geom: Geometry, list of geometries, or GeoDataFrame to smooth.
         segment_length: Resolution of the original raster data in map units. Used for
@@ -118,6 +123,10 @@ def smoothify(
     Raises:
         ValueError: If input is not a supported geometry type.
 
+    Warns:
+        UserWarning: If an invalid geometry is encountered; it is returned
+            unchanged rather than smoothed.
+
     Examples:
         >>> from smoothify import smoothify
         >>> import geopandas as gpd
@@ -133,6 +142,10 @@ def smoothify(
         >>> # Smooth a GeoDataFrame in parallel
         >>> gdf = gpd.read_file("water_bodies.gpkg")
         >>> smoothed_gdf = smoothify(gdf, segment_length=10.0, num_cores=4)
+        >>>
+        >>> # Repair invalid geometries first so they get smoothed
+        >>> gdf.geometry = gdf.geometry.make_valid()
+        >>> smoothed_gdf = smoothify(gdf, segment_length=10.0)
     """  # noqa: E501
     if smooth_iterations == 0:
         return geom

@@ -135,6 +135,16 @@ def _generate_starting_point_variants(
             variants.append(shifted_geoms)
 
         return variants
+    elif isinstance(geom, MultiPolygon):
+        # Invalid input is screened out before smoothing, so a valid Polygon
+        # should never become multi-part here. If it does, segmentize/simplify
+        # split it unexpectedly — surface that rather than a bare type error.
+        raise ValueError(
+            "Preprocessing produced a MultiPolygon from a single Polygon "
+            f"({len(geom.geoms)} parts); expected it to stay single-part. "
+            "This usually means the input geometry was invalid "
+            "(self-intersecting). Repair it with shapely's make_valid() first."
+        )
     else:
         raise ValueError(
             f"Input geometry must be a Polygon or LineString, got {type(geom)}."

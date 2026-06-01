@@ -1,3 +1,4 @@
+import warnings
 from functools import partial
 from multiprocessing import get_context
 from typing import Optional, Sequence, cast
@@ -17,6 +18,49 @@ from shapely.geometry import (
 from shapely.geometry.base import BaseGeometry
 
 from .smoothify_core import _join_adjacent, _smoothify_geometry
+
+_INVALID_GEOM_HINT = (
+    "Repair it first with shapely's make_valid() "
+    "(or geopandas GeoSeries.make_valid()) and smooth again."
+)
+
+
+def _warn_invalid(count: int, geom_type: Optional[str] = None) -> None:
+    """Emit a single warning that ``count`` invalid geometries were skipped.
+
+    Called in the main process (not inside parallel workers) so the warning
+    reliably reaches the user."""
+    if count == 1 and geom_type is not None:
+        msg = (
+            f"Skipping invalid {geom_type} (e.g. self-intersecting); returning "
+            f"it unchanged. {_INVALID_GEOM_HINT}"
+        )
+    else:
+        plural = "geometry" if count == 1 else "geometries"
+        msg = (
+            f"Skipping {count} invalid {plural} (e.g. self-intersecting); "
+            f"returning them unchanged. {_INVALID_GEOM_HINT}"
+        )
+    warnings.warn(msg, stacklevel=2)
+
+
+def _partition_valid(
+    geoms: Sequence[BaseGeometry],
+) -> tuple[list[BaseGeometry], list[BaseGeometry]]:
+    """Split geometries into (smoothable, invalid).
+
+    Empty geometries count as smoothable (they pass straight through the
+    smoothing functions unchanged). Invalid geometries are pulled aside so the
+    merge/dissolve step can't silently repair them and so they are never sent
+    to worker processes."""
+    valid: list[BaseGeometry] = []
+    invalid: list[BaseGeometry] = []
+    for g in geoms:
+        if g.is_empty or g.is_valid:
+            valid.append(g)
+        else:
+            invalid.append(g)
+    return valid, invalid
 
 
 def _smoothify_multipolygon(
@@ -227,6 +271,16 @@ def _smoothify_geodataframe(
 
     modified_gdf = gdf.copy()
 
+    # Screen out invalid geometries up front. Smoothing can't process them and
+    # the merge/dissolve step below would otherwise silently repair them --
+    # both inconsistent with the single-geometry path. They are set aside and
+    # appended back unchanged so the result still covers every input feature.
+    valid_mask = modified_gdf.geometry.is_valid | modified_gdf.geometry.is_empty
+    invalid_gdf = modified_gdf[~valid_mask].copy()
+    if len(invalid_gdf) > 0:
+        _warn_invalid(len(invalid_gdf))
+        modified_gdf = modified_gdf[valid_mask].copy()
+
     if merge_collection:
         # Only merge polygons, not linestrings
         # Separate polygons from other geometry types
@@ -273,6 +327,15 @@ def _smoothify_geodataframe(
             )
             for geom in modified_gdf.geometry
         )
+
+    # Re-attach any invalid geometries that were set aside, unchanged, so the
+    # output still has a row for every input feature.
+    if len(invalid_gdf) > 0:
+        modified_gdf = gpd.GeoDataFrame(
+            pd.concat([modified_gdf, invalid_gdf], ignore_index=True),
+            crs=gdf.crs,
+        )
+
     return modified_gdf
 
 
@@ -288,8 +351,24 @@ def _smoothify_single(
 
     Central dispatcher that routes geometries to specialized smoothing functions
     based on their type. Handles all supported geometry types including simple
-    and multi-part geometries."""  # noqa: E501
+    and multi-part geometries.
+
+    Invalid geometries (e.g. self-intersecting polygons) are not smoothed:
+    smoothing relies on segmentize/simplify/union behaving predictably, which
+    they do not for invalid input. Such geometries are returned unchanged with
+    a warning so batch jobs keep running and output stays aligned 1:1 with
+    input."""  # noqa: E501
     if geom.is_empty:
+        return geom
+
+    if not geom.is_valid:
+        warnings.warn(
+            f"Skipping invalid {geom.geom_type} (e.g. self-intersecting); "
+            "returning it unchanged. Repair it first with shapely's "
+            "make_valid() (or geopandas GeoSeries.make_valid()) and smooth "
+            "again.",
+            stacklevel=2,
+        )
         return geom
 
     if isinstance(geom, Polygon):
@@ -355,6 +434,14 @@ def _smoothify_bulk(
 
     input_type = type(geom)
 
+    # Screen out invalid geometries up front: smoothing can't process them, and
+    # the merge step below would otherwise silently repair them (inconsistent
+    # with the single-geometry path). Set aside and appended back unchanged.
+    valid_geoms, invalid_geoms = _partition_valid(list(geom.geoms))
+    if invalid_geoms:
+        _warn_invalid(len(invalid_geoms))
+        geom = GeometryCollection(valid_geoms)
+
     # join adjacent polygons found in a geometry collection
     if merge_collection and isinstance(geom, GeometryCollection):
         geom_joined = _join_adjacent(geom=geom, segment_length=segment_length)
@@ -383,6 +470,9 @@ def _smoothify_bulk(
         ctx = get_context("spawn")
         with ctx.Pool(num_cores) as pool:
             geom_smoothed = pool.map(smoothify_partial, geom.geoms)
+
+    # Re-attach untouched invalid geometries so every input is represented.
+    geom_smoothed = list(geom_smoothed) + invalid_geoms
 
     if input_type == MultiPolygon:
         if geom_smoothed and all(isinstance(g, Polygon) for g in geom_smoothed):
