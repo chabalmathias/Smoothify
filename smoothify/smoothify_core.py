@@ -1,6 +1,7 @@
 from typing import cast
 
 import numpy as np
+import numpy.typing as npt
 from scipy.optimize import brentq
 from shapely import make_valid
 from shapely.geometry import (
@@ -70,7 +71,7 @@ def _chaikin_corner_cutting(
     return LineString(points) if isinstance(geom, LineString) else Polygon(points)
 
 
-def _rotate_ring_coords(ring, shift):
+def _rotate_ring_coords(ring: LinearRing, shift: float) -> "npt.NDArray[np.float64]":
     """Rotate a linear ring coordinate sequence by a fractional shift.
 
     Used to create multiple starting point variants of a polygon for smoothing,
@@ -135,6 +136,16 @@ def _generate_starting_point_variants(
             variants.append(shifted_geoms)
 
         return variants
+    elif isinstance(geom, MultiPolygon):
+        # Invalid input is screened out before smoothing, so a valid Polygon
+        # should never become multi-part here. If it does, segmentize/simplify
+        # split it unexpectedly — surface that rather than a bare type error.
+        raise ValueError(
+            "Preprocessing produced a MultiPolygon from a single Polygon "
+            f"({len(geom.geoms)} parts); expected it to stay single-part. "
+            "This usually means the input geometry was invalid "
+            "(self-intersecting). Repair it with shapely's make_valid() first."
+        )
     else:
         raise ValueError(
             f"Input geometry must be a Polygon or LineString, got {type(geom)}."
@@ -165,7 +176,7 @@ def _preserve_area_with_buffer(
 
     def area_delta(distance: float) -> float:
         buffered_polygon = polygon.buffer(distance)
-        return buffered_polygon.area - target_area
+        return float(buffered_polygon.area - target_area)
 
     scale = (
         abs(initial_guess) * 2 if initial_guess != 0 else (polygon.area / 3.1416) ** 0.5

@@ -1,5 +1,5 @@
 [build-system]
-requires = ["setuptools >= 61.0"]
+requires = ["setuptools>=77", "setuptools-scm>=8"]
 build-backend = "setuptools.build_meta"
 
 [project]
@@ -17,27 +17,64 @@ dependencies = [
 ]
 
 license = "MIT"
+license-files = ["LICENSE"]
 readme = {file = "README.md", content-type = "text/markdown"}
 keywords = ["geometry", "smoothing", "smooth", "GIS", "raster", "vector", "chaikin", "shapely", "geopandas"]
+classifiers = [
+    "Development Status :: 4 - Beta",
+    "Intended Audience :: Science/Research",
+    "Intended Audience :: Developers",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: 3.13",
+    "Programming Language :: Python :: 3.14",
+    "Operating System :: OS Independent",
+    "Topic :: Scientific/Engineering :: GIS",
+    "Topic :: Scientific/Engineering :: Image Processing",
+]
 
 
-[tool.setuptools.dynamic]
-version = {attr = "smoothify.__version__.__version__"}
+[tool.setuptools_scm]
+version_file = "smoothify/_version.py"
 
 [dependency-groups]
 dev = [
     "descartes>=1.1.0",
     "ipykernel>=6.29.5",
     "matplotlib>=3.9.4",
+    "mypy>=1.19",
+    "nbmake>=1.5.5",
+    "pre-commit>=4.0",
     "pytest>=8.4.2",
     "pytest-cov>=6.0.0",
+    "ruff>=0.12.2",
 ]
 
 [project.urls]
 Homepage = "https://github.com/DPIRD-DMA/Smoothify"
+Repository = "https://github.com/DPIRD-DMA/Smoothify"
+Issues = "https://github.com/DPIRD-DMA/Smoothify/issues"
+Changelog = "https://github.com/DPIRD-DMA/Smoothify/blob/main/CHANGELOG.md"
 
 [tool.setuptools]
 packages = ["smoothify"]
 
+[tool.setuptools.package-data]
+smoothify = ["py.typed"]
+
+[tool.mypy]
+files = ["smoothify"]
+ignore_missing_imports = true
+strict = true
+
+[tool.ruff]
+extend-exclude = ["smoothify/_version.py"]
+
 [tool.ruff.lint]
 select = ["E", "F", "B"]
+
+[tool.ruff.lint.per-file-ignores]
+"tests/*" = ["E402"]
+"*.ipynb" = ["E402", "E501"]

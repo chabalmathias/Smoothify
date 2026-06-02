@@ -15,8 +15,12 @@ def water_gdf():
     return gpd.read_file(TEST_DATA)
 
 
+@pytest.mark.slow
 class TestRealWorldWaterBodies:
-    """Smoke tests to ensure smoothify works on real-world data with various settings."""
+    """Smoke tests that smoothify works on real-world data with various settings.
+
+    Marked ``slow`` (end-to-end smoothing over real water-body geometries, ~1 min
+    total). Deselected by the pre-push hook for speed; CI still runs them."""
 
     def test_default_settings(self, water_gdf):
         result = smoothify(geom=water_gdf, smooth_iterations=3, num_cores=1)

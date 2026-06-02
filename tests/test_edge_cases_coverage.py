@@ -6,13 +6,12 @@ from shapely.geometry import (
     LinearRing,
     LineString,
     MultiLineString,
-    MultiPolygon,
     Point,
     Polygon,
 )
 
 from smoothify import smoothify
-from smoothify.geometry_ops import _join_adjacent, _smoothify_multilinestring
+from smoothify.geometry_ops import _smoothify_multilinestring
 from smoothify.smoothify_core import (
     _generate_starting_point_variants,
     _preserve_area_with_buffer,
@@ -129,7 +128,13 @@ class TestErrorConditions:
         """Test case where union of variants produces MultiPolygon."""
         # Create a very thin polygon that might split when smoothed
         thin_polygon = Polygon(
-            [(0, 0), (0.01, 0), (0.01, 10), (0.005, 5), (0, 10)]  # Very thin with indent
+            [
+                (0, 0),
+                (0.01, 0),
+                (0.01, 10),
+                (0.005, 5),
+                (0, 10),
+            ]  # Very thin with indent
         )
 
         # Use aggressive smoothing that might cause splitting
@@ -147,7 +152,7 @@ class TestErrorConditions:
         assert isinstance(result, (Polygon, LinearRing))
 
     def test_smoothify_multilinestring_fallback_to_collection(self):
-        """Test MultiLineString that can't maintain structure returns GeometryCollection."""
+        """MultiLineString that can't keep its structure returns a Collection."""
         # Create lines that might not all process cleanly
         line1 = LineString([(0, 0), (1, 0)])  # Very short
         line2 = LineString([(10, 10), (11, 10)])
@@ -181,7 +186,9 @@ class TestErrorConditions:
     def test_preserve_area_empty_polygon(self):
         """Test preserving area of empty polygon."""
         empty_poly = Polygon()
-        result = _preserve_area_with_buffer(empty_poly, target_area=100.0, tolerance=0.1)
+        result = _preserve_area_with_buffer(
+            empty_poly, target_area=100.0, tolerance=0.1
+        )
         assert result.is_empty
 
     def test_preserve_area_tolerance_fallback_refinement(self):

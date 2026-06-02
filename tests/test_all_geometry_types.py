@@ -85,11 +85,14 @@ class TestPolygonComplex:
     def test_polygon_with_many_holes(self):
         exterior = [(0, 0), (100, 0), (100, 100), (0, 100)]
         holes = [
-            [(10 + 25 * i, 10 + 25 * j),
-             (20 + 25 * i, 10 + 25 * j),
-             (20 + 25 * i, 20 + 25 * j),
-             (10 + 25 * i, 20 + 25 * j)]
-            for i in range(3) for j in range(3)
+            [
+                (10 + 25 * i, 10 + 25 * j),
+                (20 + 25 * i, 10 + 25 * j),
+                (20 + 25 * i, 20 + 25 * j),
+                (10 + 25 * i, 20 + 25 * j),
+            ]
+            for i in range(3)
+            for j in range(3)
         ]
         poly = Polygon(exterior, holes)
         result = smoothify(poly, segment_length=1.0)
@@ -99,8 +102,7 @@ class TestPolygonComplex:
         """High-vertex polygon approximating a circle."""
         n = 200
         coords = [
-            (10 * math.cos(2 * math.pi * i / n),
-             10 * math.sin(2 * math.pi * i / n))
+            (10 * math.cos(2 * math.pi * i / n), 10 * math.sin(2 * math.pi * i / n))
             for i in range(n)
         ]
         poly = Polygon(coords)
@@ -109,9 +111,16 @@ class TestPolygonComplex:
         assert result.is_valid
 
     def test_L_shaped_polygon(self):
-        poly = Polygon([
-            (0, 0), (10, 0), (10, 5), (5, 5), (5, 10), (0, 10),
-        ])
+        poly = Polygon(
+            [
+                (0, 0),
+                (10, 0),
+                (10, 5),
+                (5, 5),
+                (5, 10),
+                (0, 10),
+            ]
+        )
         result = smoothify(poly, segment_length=0.5)
         assert isinstance(result, Polygon)
         assert result.is_valid
@@ -182,10 +191,22 @@ class TestLineStringComplex:
 
     def test_self_intersecting_line(self):
         """Self-intersecting line must stay a LineString, not be split."""
-        line = LineString([
-            (0, 0), (2, 0), (3, 0), (4, 1), (3, 2), (2, 2), (1, 1),
-            (2, 0.5), (3, 0.5), (4, 0), (5, 0), (7, 0),
-        ])
+        line = LineString(
+            [
+                (0, 0),
+                (2, 0),
+                (3, 0),
+                (4, 1),
+                (3, 2),
+                (2, 2),
+                (1, 1),
+                (2, 0.5),
+                (3, 0.5),
+                (4, 0),
+                (5, 0),
+                (7, 0),
+            ]
+        )
         assert not line.is_simple
         result = smoothify(line, segment_length=0.5)
         assert isinstance(result, LineString)
@@ -235,8 +256,7 @@ class TestLinearRing:
         """Ring with many vertices."""
         n = 50
         coords = [
-            (10 * math.cos(2 * math.pi * i / n),
-             10 * math.sin(2 * math.pi * i / n))
+            (10 * math.cos(2 * math.pi * i / n), 10 * math.sin(2 * math.pi * i / n))
             for i in range(n)
         ]
         ring = LinearRing(coords)
@@ -280,9 +300,16 @@ class TestMultiPolygonComplex:
     def test_many_small_polygons(self):
         """Grid of small polygons."""
         polys = [
-            Polygon([(i * 15, j * 15), (i * 15 + 5, j * 15),
-                     (i * 15 + 5, j * 15 + 5), (i * 15, j * 15 + 5)])
-            for i in range(4) for j in range(4)
+            Polygon(
+                [
+                    (i * 15, j * 15),
+                    (i * 15 + 5, j * 15),
+                    (i * 15 + 5, j * 15 + 5),
+                    (i * 15, j * 15 + 5),
+                ]
+            )
+            for i in range(4)
+            for j in range(4)
         ]
         mp = MultiPolygon(polys)
         result = smoothify(mp, segment_length=1.0, merge_multipolygons=False)
@@ -312,10 +339,12 @@ class TestMultiLineStringSimple:
     """Simple MultiLineString inputs."""
 
     def test_two_lines(self):
-        ml = MultiLineString([
-            [(0, 0), (5, 5)],
-            [(10, 0), (15, 5)],
-        ])
+        ml = MultiLineString(
+            [
+                [(0, 0), (5, 5)],
+                [(10, 0), (15, 5)],
+            ]
+        )
         result = smoothify(ml, segment_length=1.0)
         assert result.is_valid
 
@@ -329,10 +358,7 @@ class TestMultiLineStringComplex:
     """Complex MultiLineString inputs."""
 
     def test_many_lines(self):
-        lines = [
-            [(i * 10, 0), (i * 10 + 5, 5), (i * 10 + 10, 0)]
-            for i in range(10)
-        ]
+        lines = [[(i * 10, 0), (i * 10 + 5, 5), (i * 10 + 10, 0)] for i in range(10)]
         ml = MultiLineString(lines)
         result = smoothify(ml, segment_length=1.0)
         assert result.is_valid
@@ -348,17 +374,31 @@ class TestMultiLineStringComplex:
 
     def test_long_and_short_lines(self):
         short = LineString([(0, 0), (1, 1)])
-        long_line = LineString([(10, 10)] + [(10 + i, 10 + math.sin(i)) for i in range(100)])
+        long_line = LineString(
+            [(10, 10)] + [(10 + i, 10 + math.sin(i)) for i in range(100)]
+        )
         ml = MultiLineString([short, long_line])
         result = smoothify(ml, segment_length=1.0)
         assert result.is_valid
 
     def test_self_intersecting_multilinestring(self):
         """MultiLineString containing a self-intersecting line."""
-        si_line = LineString([
-            (0, 0), (2, 0), (3, 0), (4, 1), (3, 2), (2, 2), (1, 1),
-            (2, 0.5), (3, 0.5), (4, 0), (5, 0), (7, 0),
-        ])
+        si_line = LineString(
+            [
+                (0, 0),
+                (2, 0),
+                (3, 0),
+                (4, 1),
+                (3, 2),
+                (2, 2),
+                (1, 1),
+                (2, 0.5),
+                (3, 0.5),
+                (4, 0),
+                (5, 0),
+                (7, 0),
+            ]
+        )
         normal_line = LineString([(10, 0), (15, 5), (20, 0)])
         ml = MultiLineString([si_line, normal_line])
         result = smoothify(ml, segment_length=0.5)
@@ -393,14 +433,18 @@ class TestGeometryCollectionComplex:
         """Collection with every supported geometry type."""
         poly = Polygon([(0, 0), (10, 0), (10, 10), (0, 10)])
         line = LineString([(20, 0), (25, 5), (30, 0)])
-        mp = MultiPolygon([
-            Polygon([(40, 0), (45, 0), (45, 5), (40, 5)]),
-            Polygon([(50, 0), (55, 0), (55, 5), (50, 5)]),
-        ])
-        ml = MultiLineString([
-            [(60, 0), (65, 5)],
-            [(70, 0), (75, 5)],
-        ])
+        mp = MultiPolygon(
+            [
+                Polygon([(40, 0), (45, 0), (45, 5), (40, 5)]),
+                Polygon([(50, 0), (55, 0), (55, 5), (50, 5)]),
+            ]
+        )
+        ml = MultiLineString(
+            [
+                [(60, 0), (65, 5)],
+                [(70, 0), (75, 5)],
+            ]
+        )
         gc = GeometryCollection([poly, line, mp, ml])
         result = smoothify(gc, segment_length=1.0)
         assert result.is_valid
@@ -408,14 +452,26 @@ class TestGeometryCollectionComplex:
     def test_many_mixed_geometries(self):
         geoms = []
         for i in range(5):
-            geoms.append(Polygon([
-                (i * 20, 0), (i * 20 + 8, 0),
-                (i * 20 + 8, 8), (i * 20, 8),
-            ]))
+            geoms.append(
+                Polygon(
+                    [
+                        (i * 20, 0),
+                        (i * 20 + 8, 0),
+                        (i * 20 + 8, 8),
+                        (i * 20, 8),
+                    ]
+                )
+            )
         for i in range(5):
-            geoms.append(LineString([
-                (i * 20, 20), (i * 20 + 5, 25), (i * 20 + 10, 20),
-            ]))
+            geoms.append(
+                LineString(
+                    [
+                        (i * 20, 20),
+                        (i * 20 + 5, 25),
+                        (i * 20 + 10, 20),
+                    ]
+                )
+            )
         gc = GeometryCollection(geoms)
         result = smoothify(gc, segment_length=1.0)
         assert result.is_valid
@@ -429,8 +485,7 @@ class TestListInput:
 
     def test_list_of_polygons(self):
         polys = [
-            Polygon([(i * 20, 0), (i * 20 + 10, 0),
-                     (i * 20 + 10, 10), (i * 20, 10)])
+            Polygon([(i * 20, 0), (i * 20 + 10, 0), (i * 20 + 10, 10), (i * 20, 10)])
             for i in range(3)
         ]
         result = smoothify(polys, segment_length=1.0)
@@ -479,19 +534,27 @@ class TestSmoothingParamsAllTypes:
         assert isinstance(result, LineString)
 
     def test_multipolygon_iterations(self, iterations, seg_len):
-        mp = MultiPolygon([
-            Polygon([(0, 0), (8, 0), (8, 8), (0, 8)]),
-            Polygon([(20, 0), (28, 0), (28, 8), (20, 8)]),
-        ])
-        result = smoothify(mp, segment_length=seg_len,
-                           smooth_iterations=iterations, merge_multipolygons=False)
+        mp = MultiPolygon(
+            [
+                Polygon([(0, 0), (8, 0), (8, 8), (0, 8)]),
+                Polygon([(20, 0), (28, 0), (28, 8), (20, 8)]),
+            ]
+        )
+        result = smoothify(
+            mp,
+            segment_length=seg_len,
+            smooth_iterations=iterations,
+            merge_multipolygons=False,
+        )
         assert result.is_valid
 
     def test_multilinestring_iterations(self, iterations, seg_len):
-        ml = MultiLineString([
-            [(0, 0), (5, 5), (10, 0)],
-            [(20, 0), (25, 5), (30, 0)],
-        ])
+        ml = MultiLineString(
+            [
+                [(0, 0), (5, 5), (10, 0)],
+                [(20, 0), (25, 5), (30, 0)],
+            ]
+        )
         result = smoothify(ml, segment_length=seg_len, smooth_iterations=iterations)
         assert result.is_valid
 
@@ -547,9 +610,7 @@ class TestDegenerateGeometries:
 
     def test_polygon_hole_touching_exterior(self):
         """Hole that shares a vertex with the exterior ring."""
-        geom = wkt.loads(
-            "POLYGON((0 0,10 0,10 10,0 10,0 0),(5 0,8 3,5 6,2 3,5 0))"
-        )
+        geom = wkt.loads("POLYGON((0 0,10 0,10 10,0 10,0 0),(5 0,8 3,5 6,2 3,5 0))")
         assert geom.is_valid
         result = smoothify(geom, segment_length=1.0)
         assert result.is_valid
@@ -606,10 +667,17 @@ class TestDegenerateGeometries:
 
     def test_polygon_with_collinear_points(self):
         """Polygon where several consecutive vertices are collinear."""
-        poly = Polygon([
-            (0, 0), (2, 0), (5, 0), (8, 0), (10, 0),
-            (10, 10), (0, 10),
-        ])
+        poly = Polygon(
+            [
+                (0, 0),
+                (2, 0),
+                (5, 0),
+                (8, 0),
+                (10, 0),
+                (10, 10),
+                (0, 10),
+            ]
+        )
         result = smoothify(poly, segment_length=1.0)
         assert isinstance(result, Polygon)
         assert result.is_valid
@@ -653,9 +721,15 @@ class TestDegenerateGeometries:
 
     def test_nearly_coincident_vertices(self):
         """Polygon with vertices separated by < 1e-10."""
-        poly = Polygon([
-            (0, 0), (10, 0), (10, 1e-11), (10, 10), (0, 10),
-        ])
+        poly = Polygon(
+            [
+                (0, 0),
+                (10, 0),
+                (10, 1e-11),
+                (10, 10),
+                (0, 10),
+            ]
+        )
         result = smoothify(poly, segment_length=1.0)
         assert result.is_valid
 
@@ -693,10 +767,12 @@ class TestZCoordinates:
         assert result.is_valid
 
     def test_multilinestring_z(self):
-        ml = MultiLineString([
-            [(0, 0, 0), (5, 5, 10)],
-            [(10, 0, 0), (15, 5, 10)],
-        ])
+        ml = MultiLineString(
+            [
+                [(0, 0, 0), (5, 5, 10)],
+                [(10, 0, 0), (15, 5, 10)],
+            ]
+        )
         result = smoothify(ml, segment_length=1.0)
         assert result.is_valid
 
@@ -709,27 +785,40 @@ class TestNumericEdgeCases:
 
     def test_very_large_coordinates(self):
         """Coordinates typical of projected CRS (e.g. UTM easting/northing)."""
-        poly = Polygon([
-            (500000, 6000000), (500100, 6000000),
-            (500100, 6000100), (500000, 6000100),
-        ])
+        poly = Polygon(
+            [
+                (500000, 6000000),
+                (500100, 6000000),
+                (500100, 6000100),
+                (500000, 6000100),
+            ]
+        )
         result = smoothify(poly, segment_length=10.0)
         assert isinstance(result, Polygon)
         assert result.is_valid
 
     def test_very_small_coordinates(self):
         """Tiny fractional coordinates."""
-        poly = Polygon([
-            (0, 0), (1e-6, 0), (1e-6, 1e-6), (0, 1e-6),
-        ])
+        poly = Polygon(
+            [
+                (0, 0),
+                (1e-6, 0),
+                (1e-6, 1e-6),
+                (0, 1e-6),
+            ]
+        )
         result = smoothify(poly, segment_length=1e-7)
         assert isinstance(result, Polygon)
         assert result.is_valid
 
     def test_large_coordinate_linestring(self):
-        line = LineString([
-            (1e7, 1e7), (1e7 + 50, 1e7 + 50), (1e7 + 100, 1e7),
-        ])
+        line = LineString(
+            [
+                (1e7, 1e7),
+                (1e7 + 50, 1e7 + 50),
+                (1e7 + 100, 1e7),
+            ]
+        )
         result = smoothify(line, segment_length=5.0)
         assert isinstance(result, LineString)
 
@@ -820,8 +909,9 @@ class TestInvariants:
     def test_area_preservation_tight(self):
         """With preserve_area=True, area should be within tolerance."""
         poly = Polygon([(0, 0), (50, 0), (50, 50), (0, 50)])
-        result = smoothify(poly, segment_length=5.0, preserve_area=True,
-                           area_tolerance=0.01)
+        result = smoothify(
+            poly, segment_length=5.0, preserve_area=True, area_tolerance=0.01
+        )
         assert isinstance(result, Polygon)
         pct_error = abs(result.area - poly.area) / poly.area * 100
         assert pct_error < 1.0, f"Area error {pct_error:.4f}% exceeds 1%"
@@ -866,15 +956,19 @@ class TestInvariants:
         inputs = [
             Polygon([(0, 0), (10, 0), (10, 10), (0, 10)]),
             LineString([(0, 0), (5, 5), (10, 0)]),
-            MultiPolygon([
-                Polygon([(0, 0), (5, 0), (5, 5), (0, 5)]),
-                Polygon([(20, 20), (25, 20), (25, 25), (20, 25)]),
-            ]),
+            MultiPolygon(
+                [
+                    Polygon([(0, 0), (5, 0), (5, 5), (0, 5)]),
+                    Polygon([(20, 20), (25, 20), (25, 25), (20, 25)]),
+                ]
+            ),
             MultiLineString([[(0, 0), (5, 5)], [(10, 0), (15, 5)]]),
-            GeometryCollection([
-                Polygon([(0, 0), (10, 0), (10, 10), (0, 10)]),
-                LineString([(20, 0), (30, 10)]),
-            ]),
+            GeometryCollection(
+                [
+                    Polygon([(0, 0), (10, 0), (10, 10), (0, 10)]),
+                    LineString([(20, 0), (30, 10)]),
+                ]
+            ),
         ]
         for geom in inputs:
             result = smoothify(geom, segment_length=1.0)

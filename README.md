@@ -205,12 +205,48 @@ Smoothify uses an advanced multi-step smoothing pipeline:
 6. Applies final smoothing pass
 7. Optionally restores original area via buffering (for Polygons)
 
+## Invalid Geometries
+
+Smoothify does not repair invalid input. If it encounters an invalid geometry (e.g. a self-intersecting polygon), it returns that geometry **unchanged** and emits a warning, instead of crashing or silently producing an empty geometry. This is consistent whether you pass a single geometry, a list/collection, or a GeoDataFrame.
+
+If you want invalid geometries smoothed, repair them first with shapely's `make_valid()`:
+
+```python
+# GeoDataFrame
+gdf.geometry = gdf.geometry.make_valid()
+smoothed_gdf = smoothify(gdf, segment_length=10.0)
+
+# Single geometry
+from shapely import make_valid
+smoothed = smoothify(make_valid(polygon), segment_length=1.0)
+```
+
 ## Performance Considerations
 
 - **Parallel Processing**: For large GeoDataFrames or collections, use `num_cores` = 0 to enable parallel processing
 - **Smoothing Iterations**: Values of 3-5 typically provide good results. Higher values create smoother output but increase processing time and vertex count
 - **Memory Usage**: Scales with geometry complexity. The algorithm creates multiple variants during smoothing
 - **Optimal segment_length**: Should match the original raster cell size (pixel size) or be slightly larger for best results
+
+## Running the Tests
+
+Smoothify uses [pytest](https://pytest.org/). After cloning the repository, install the development dependencies and run the suite with [uv](https://docs.astral.sh/uv/):
+
+```bash
+# Install dependencies (including the dev group)
+uv sync
+
+# Run all tests
+uv run pytest tests/
+
+# Run with coverage
+uv run pytest tests/ --cov=smoothify --cov-report=html
+
+# Run a single test
+uv run pytest tests/test_chaikin.py::TestChaikinCornerCutting::test_simple_square_polygon
+```
+
+If you prefer not to use uv, install the dev dependencies into your environment and run `pytest tests/` directly.
 
 ## Contributing
 

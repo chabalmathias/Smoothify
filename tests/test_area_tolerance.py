@@ -1,6 +1,5 @@
 """Tests for the area_tolerance parameter."""
 
-import pytest
 from shapely.geometry import Polygon
 from smoothify import smoothify
 

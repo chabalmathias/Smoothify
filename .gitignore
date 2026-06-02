@@ -178,3 +178,9 @@ private test data/*
 *.DS_Store
 test data/output/*
 examples/Water_Smoothed.gpkg
+
+# setuptools-scm generated version file
+smoothify/_version.py
+
+# uv lockfile (not tracked — library, resolve fresh)
+uv.lock
