@@ -4,7 +4,10 @@ All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
 
-## [0.2.3] - 2026-06-01
+## [0.2.3] - 2026-06-02
+
+### Added
+- The package now ships inline type hints and a `py.typed` marker, so type checkers (mypy, Pyright/Pylance) pick up `smoothify()`'s signatures and overloads in downstream code.
 
 ### Changed
 - Invalid geometries (e.g. self-intersecting polygons) are now returned unchanged with a warning instead of crashing with a cryptic error or silently collapsing to an empty geometry. Behaviour is consistent across single geometries, lists/collections, and GeoDataFrames (and regardless of `merge_collection`). Repair them with shapely's `make_valid()` first if you want them smoothed.
