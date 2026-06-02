@@ -201,7 +201,7 @@ def _smoothify_polygon(
                 if not hole_inside.is_empty:
                     smooth_polygon = smooth_polygon.difference(hole_inside)
 
-    return smooth_polygon
+    return cast("Polygon | MultiPolygon", smooth_polygon)
 
 
 def _smoothify_multilinestring(
@@ -284,7 +284,7 @@ def _smoothify_geodataframe(
     if merge_collection:
         # Only merge polygons, not linestrings
         # Separate polygons from other geometry types
-        polygon_mask = modified_gdf.geometry.geom_type.isin(['Polygon', 'MultiPolygon'])
+        polygon_mask = modified_gdf.geometry.geom_type.isin(["Polygon", "MultiPolygon"])
 
         if polygon_mask.any():
             # Process polygons
@@ -299,8 +299,7 @@ def _smoothify_geodataframe(
             if not polygon_mask.all():
                 other_gdf = modified_gdf[~polygon_mask].copy()
                 modified_gdf = gpd.GeoDataFrame(
-                    pd.concat([polygon_gdf, other_gdf], ignore_index=True),
-                    crs=gdf.crs
+                    pd.concat([polygon_gdf, other_gdf], ignore_index=True), crs=gdf.crs
                 )
             else:
                 modified_gdf = polygon_gdf
@@ -315,18 +314,17 @@ def _smoothify_geodataframe(
         area_tolerance=area_tolerance,
     )
 
+    smoothed: list[BaseGeometry]
     if num_cores == 1:
-        modified_gdf.geometry = [
-            smoothify_partial(geom) for geom in modified_gdf.geometry
-        ]
-
+        smoothed = [smoothify_partial(geom) for geom in modified_gdf.geometry]
     else:
-        modified_gdf.geometry = Parallel(n_jobs=num_cores)(
-            delayed(smoothify_partial)(
-                geom,  # type: ignore
-            )
-            for geom in modified_gdf.geometry
+        smoothed = cast(
+            "list[BaseGeometry]",
+            Parallel(n_jobs=num_cores)(
+                delayed(smoothify_partial)(geom) for geom in modified_gdf.geometry
+            ),
         )
+    modified_gdf.geometry = smoothed
 
     # Re-attach any invalid geometries that were set aside, unchanged, so the
     # output still has a row for every input feature.
@@ -476,10 +474,12 @@ def _smoothify_bulk(
 
     if input_type == MultiPolygon:
         if geom_smoothed and all(isinstance(g, Polygon) for g in geom_smoothed):
-            return MultiPolygon(cast(list[Polygon], geom_smoothed))
+            return MultiPolygon([g for g in geom_smoothed if isinstance(g, Polygon)])
     elif input_type == MultiLineString:
         if geom_smoothed and all(isinstance(g, LineString) for g in geom_smoothed):
-            return MultiLineString(cast(list[LineString], geom_smoothed))
+            return MultiLineString(
+                [g for g in geom_smoothed if isinstance(g, LineString)]
+            )
 
     return GeometryCollection(geom_smoothed)
 
@@ -523,7 +523,9 @@ def _auto_detect_segment_length(
 
         min_length = None
 
-        def compute_min_segment_from_coords(coords_list):
+        def compute_min_segment_from_coords(
+            coords_list: list[tuple[float, ...]],
+        ) -> Optional[float]:
             """Vectorized computation of minimum segment length from coordinates."""
             coords_array = np.array(coords_list)
             if len(coords_array) < 2:

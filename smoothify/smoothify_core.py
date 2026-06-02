@@ -1,6 +1,7 @@
 from typing import cast
 
 import numpy as np
+import numpy.typing as npt
 from scipy.optimize import brentq
 from shapely import make_valid
 from shapely.geometry import (
@@ -70,7 +71,7 @@ def _chaikin_corner_cutting(
     return LineString(points) if isinstance(geom, LineString) else Polygon(points)
 
 
-def _rotate_ring_coords(ring, shift):
+def _rotate_ring_coords(ring: LinearRing, shift: float) -> "npt.NDArray[np.float64]":
     """Rotate a linear ring coordinate sequence by a fractional shift.
 
     Used to create multiple starting point variants of a polygon for smoothing,
@@ -175,7 +176,7 @@ def _preserve_area_with_buffer(
 
     def area_delta(distance: float) -> float:
         buffered_polygon = polygon.buffer(distance)
-        return buffered_polygon.area - target_area
+        return float(buffered_polygon.area - target_area)
 
     scale = (
         abs(initial_guess) * 2 if initial_guess != 0 else (polygon.area / 3.1416) ** 0.5

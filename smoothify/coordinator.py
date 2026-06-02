@@ -20,20 +20,9 @@ from smoothify.geometry_ops import (
 )
 
 
-@overload
-def smoothify(
-    geom: gpd.GeoDataFrame,
-    segment_length: Optional[float] = None,
-    num_cores: int = 0,
-    smooth_iterations: int = 3,
-    merge_collection: bool = True,
-    merge_field: Optional[str] = None,
-    merge_multipolygons: bool = True,
-    preserve_area: bool = True,
-    area_tolerance: float = 0.01,
-) -> gpd.GeoDataFrame: ...
-
-
+# NOTE: geopandas' GeoDataFrame resolves to an ``Any``-tainted type for mypy, which
+# makes it a supertype of the other overloads. It must therefore come last so the
+# narrower Sequence/BaseGeometry overloads are matched first.
 @overload
 def smoothify(
     geom: Sequence[BaseGeometry],
@@ -60,6 +49,20 @@ def smoothify(
     preserve_area: bool = True,
     area_tolerance: float = 0.01,
 ) -> BaseGeometry: ...
+
+
+@overload
+def smoothify(
+    geom: gpd.GeoDataFrame,
+    segment_length: Optional[float] = None,
+    num_cores: int = 0,
+    smooth_iterations: int = 3,
+    merge_collection: bool = True,
+    merge_field: Optional[str] = None,
+    merge_multipolygons: bool = True,
+    preserve_area: bool = True,
+    area_tolerance: float = 0.01,
+) -> gpd.GeoDataFrame: ...
 
 
 def smoothify(
