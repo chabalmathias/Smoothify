@@ -144,9 +144,7 @@ class TestMixedValidAndInvalid:
         # num_cores > 1 exercises the worker pool; the warning must still reach
         # the caller because invalid geoms are screened in the main process.
         invalid = wkt.loads(INVALID_WKT)
-        gdf = gpd.GeoDataFrame(
-            geometry=[self._square(0), invalid, self._square(100)]
-        )
+        gdf = gpd.GeoDataFrame(geometry=[self._square(0), invalid, self._square(100)])
         result = _assert_warns_invalid(
             lambda: smoothify(
                 gdf,

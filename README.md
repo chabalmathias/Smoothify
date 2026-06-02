@@ -228,6 +228,26 @@ smoothed = smoothify(make_valid(polygon), segment_length=1.0)
 - **Memory Usage**: Scales with geometry complexity. The algorithm creates multiple variants during smoothing
 - **Optimal segment_length**: Should match the original raster cell size (pixel size) or be slightly larger for best results
 
+## Running the Tests
+
+Smoothify uses [pytest](https://pytest.org/). After cloning the repository, install the development dependencies and run the suite with [uv](https://docs.astral.sh/uv/):
+
+```bash
+# Install dependencies (including the dev group)
+uv sync
+
+# Run all tests
+uv run pytest tests/
+
+# Run with coverage
+uv run pytest tests/ --cov=smoothify --cov-report=html
+
+# Run a single test
+uv run pytest tests/test_chaikin.py::TestChaikinCornerCutting::test_simple_square_polygon
+```
+
+If you prefer not to use uv, install the dev dependencies into your environment and run `pytest tests/` directly.
+
 ## Contributing
 
 Contributions are welcome! Please feel free to submit a Pull Request.

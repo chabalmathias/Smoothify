@@ -26,7 +26,6 @@ class TestRotatePolygonStart:
         assert abs(rotated.area - square.area) < 1e-10
 
 
-
 class TestGenerateStartingPointVariants:
     """Test suite for generating polygon variants."""
 
@@ -47,7 +46,6 @@ class TestGenerateStartingPointVariants:
         # LineStrings should return single item
         assert len(variants) == 1
         assert variants[0] == line
-
 
 
 class TestPreserveAreaWithBuffer:
@@ -90,7 +88,6 @@ class TestPreserveAreaWithBuffer:
         # Should be close to target area
         assert abs(preserved.area - target_area) < 1e-3
         assert preserved.area < large_polygon.area
-
 
 
 class TestJoinAdjacent:
@@ -151,10 +148,22 @@ class TestSmoothifyGeometry:
         or unary_union, which node lines at self-intersection points.
         """
         # S-curve that crosses itself — triggers unary_union splitting
-        line = LineString([
-            (0, 0), (2, 0), (3, 0), (4, 1), (3, 2), (2, 2), (1, 1),
-            (2, 0.5), (3, 0.5), (4, 0), (5, 0), (7, 0),
-        ])
+        line = LineString(
+            [
+                (0, 0),
+                (2, 0),
+                (3, 0),
+                (4, 1),
+                (3, 2),
+                (2, 2),
+                (1, 1),
+                (2, 0.5),
+                (3, 0.5),
+                (4, 0),
+                (5, 0),
+                (7, 0),
+            ]
+        )
         assert not line.is_simple  # confirm it self-intersects
 
         smoothed = _smoothify_geometry(
@@ -191,4 +200,6 @@ class TestSmoothifyGeometry:
     def test_invalid_geometry_type(self):
         """Test that invalid geometry type raises error."""
         with pytest.raises((ValueError, AttributeError)):
-            _smoothify_geometry("not a geometry", segment_length=1.0, smooth_iterations=3)  # type: ignore
+            _smoothify_geometry(
+                "not a geometry", segment_length=1.0, smooth_iterations=3
+            )  # type: ignore

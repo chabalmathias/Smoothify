@@ -103,10 +103,7 @@ class TestSmoothifyAPI:
         geoms = [polygon, linestring]
 
         smoothed = smoothify(
-            geom=geoms,
-            segment_length=1.0,
-            smooth_iterations=3,
-            merge_collection=False
+            geom=geoms, segment_length=1.0, smooth_iterations=3, merge_collection=False
         )
 
         assert smoothed.is_valid
@@ -115,8 +112,8 @@ class TestSmoothifyAPI:
 
         # Check that we have one polygon and one linestring
         geom_types = [type(g).__name__ for g in smoothed.geoms]
-        assert 'Polygon' in geom_types
-        assert 'LineString' in geom_types
+        assert "Polygon" in geom_types
+        assert "LineString" in geom_types
 
     def test_mixed_geometry_collection_preserves_all_types(self):
         """Test that GeometryCollection with polygon and linestring returns both.
@@ -132,7 +129,7 @@ class TestSmoothifyAPI:
             geom=collection,
             segment_length=1.0,
             smooth_iterations=3,
-            merge_collection=False
+            merge_collection=False,
         )
 
         assert smoothed.is_valid
@@ -141,8 +138,8 @@ class TestSmoothifyAPI:
 
         # Check that we have one polygon and one linestring
         geom_types = [type(g).__name__ for g in smoothed.geoms]
-        assert 'Polygon' in geom_types
-        assert 'LineString' in geom_types
+        assert "Polygon" in geom_types
+        assert "LineString" in geom_types
 
     def test_smoothify_geodataframe(self):
         """Test smoothing a GeoDataFrame."""
@@ -152,7 +149,9 @@ class TestSmoothifyAPI:
             {"name": ["poly1", "poly2"]}, geometry=[poly1, poly2], crs="EPSG:4326"
         )
 
-        smoothed = smoothify(geom=gdf, segment_length=1.0, smooth_iterations=3, num_cores=1)
+        smoothed = smoothify(
+            geom=gdf, segment_length=1.0, smooth_iterations=3, num_cores=1
+        )
 
         assert isinstance(smoothed, gpd.GeoDataFrame)
         assert len(smoothed) == len(gdf)
@@ -167,7 +166,9 @@ class TestSmoothifyAPI:
         ]
         gdf = gpd.GeoDataFrame(geometry=polys, crs="EPSG:4326")
 
-        smoothed = smoothify(geom=gdf, segment_length=1.0, smooth_iterations=3, num_cores=2)
+        smoothed = smoothify(
+            geom=gdf, segment_length=1.0, smooth_iterations=3, num_cores=2
+        )
 
         assert isinstance(smoothed, gpd.GeoDataFrame)
         assert len(smoothed) == len(gdf)
@@ -203,12 +204,18 @@ class TestSmoothifyAPI:
 
         # With merging
         smoothed_merged = smoothify(
-            geom=collection, segment_length=1.0, smooth_iterations=3, merge_collection=True
+            geom=collection,
+            segment_length=1.0,
+            smooth_iterations=3,
+            merge_collection=True,
         )
 
         # Without merging
         smoothed_not_merged = smoothify(
-            geom=collection, segment_length=1.0, smooth_iterations=3, merge_collection=False
+            geom=collection,
+            segment_length=1.0,
+            smooth_iterations=3,
+            merge_collection=False,
         )
 
         assert smoothed_merged.is_valid
@@ -264,7 +271,7 @@ class TestSmoothifyAPI:
         gdf = gpd.GeoDataFrame(
             {"category": ["A", "A", "B", "B"]},
             geometry=[poly1, poly2, poly3, poly4],
-            crs="EPSG:4326"
+            crs="EPSG:4326",
         )
 
         # Smooth with merge_field - should dissolve by category
@@ -274,12 +281,12 @@ class TestSmoothifyAPI:
             smooth_iterations=3,
             merge_collection=True,
             merge_field="category",
-            num_cores=1
+            num_cores=1,
         )
 
         assert isinstance(smoothed, gpd.GeoDataFrame)
         assert all(geom.is_valid for geom in smoothed.geometry)
-        # After dissolving by category and exploding, we should have fewer or equal geometries
+        # After dissolving by category and exploding, expect fewer/equal geometries
         assert len(smoothed) <= len(gdf)
 
     def test_merge_field_without_merge_collection_raises_error(self):
@@ -287,29 +294,32 @@ class TestSmoothifyAPI:
         poly1 = Polygon([(0, 0), (5, 0), (5, 5), (0, 5)])
         poly2 = Polygon([(10, 10), (15, 10), (15, 15), (10, 15)])
         gdf = gpd.GeoDataFrame(
-            {"category": ["A", "B"]},
-            geometry=[poly1, poly2],
-            crs="EPSG:4326"
+            {"category": ["A", "B"]}, geometry=[poly1, poly2], crs="EPSG:4326"
         )
 
-        with pytest.raises(ValueError, match="merge_field is only supported when merge_collection is True"):
+        with pytest.raises(
+            ValueError,
+            match="merge_field is only supported when merge_collection is True",
+        ):
             smoothify(
                 geom=gdf,
                 segment_length=1.0,
                 merge_collection=False,
                 merge_field="category",
-                num_cores=1
+                num_cores=1,
             )
 
     def test_merge_field_with_non_geodataframe_raises_error(self):
         """Test that merge_field only works with GeoDataFrame."""
         poly = Polygon([(0, 0), (5, 0), (5, 5), (0, 5)])
 
-        with pytest.raises(ValueError, match="merge_field is only supported for GeoDataFrames"):
+        with pytest.raises(
+            ValueError, match="merge_field is only supported for GeoDataFrames"
+        ):
             smoothify(
                 geom=poly,
                 segment_length=1.0,
-                merge_field="category"  # type: ignore
+                merge_field="category",  # type: ignore
             )
 
     def test_merge_field_with_invalid_column_raises_error(self):
@@ -317,18 +327,18 @@ class TestSmoothifyAPI:
         poly1 = Polygon([(0, 0), (5, 0), (5, 5), (0, 5)])
         poly2 = Polygon([(10, 10), (15, 10), (15, 15), (10, 15)])
         gdf = gpd.GeoDataFrame(
-            {"category": ["A", "B"]},
-            geometry=[poly1, poly2],
-            crs="EPSG:4326"
+            {"category": ["A", "B"]}, geometry=[poly1, poly2], crs="EPSG:4326"
         )
 
-        with pytest.raises(ValueError, match="merge_field nonexistent not found in GeoDataFrame"):
+        with pytest.raises(
+            ValueError, match="merge_field nonexistent not found in GeoDataFrame"
+        ):
             smoothify(
                 geom=gdf,
                 segment_length=1.0,
                 merge_collection=True,
                 merge_field="nonexistent",
-                num_cores=1
+                num_cores=1,
             )
 
     def test_merge_field_none_with_geodataframe(self):
@@ -337,9 +347,7 @@ class TestSmoothifyAPI:
         poly2 = Polygon([(10, 0), (20, 0), (20, 10), (10, 10)])  # Adjacent to poly1
 
         gdf = gpd.GeoDataFrame(
-            {"category": ["A", "B"]},
-            geometry=[poly1, poly2],
-            crs="EPSG:4326"
+            {"category": ["A", "B"]}, geometry=[poly1, poly2], crs="EPSG:4326"
         )
 
         # Smooth with merge_collection=True but merge_field=None
@@ -350,11 +358,10 @@ class TestSmoothifyAPI:
             smooth_iterations=3,
             merge_collection=True,
             merge_field=None,
-            num_cores=1
+            num_cores=1,
         )
 
         assert isinstance(smoothed, gpd.GeoDataFrame)
         assert all(geom.is_valid for geom in smoothed.geometry)
         # After dissolving all and exploding, we should have 1 or more geometries
         assert len(smoothed) >= 1
-

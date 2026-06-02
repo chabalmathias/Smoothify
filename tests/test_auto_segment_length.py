@@ -27,13 +27,23 @@ class TestAutoDetectPixelSize:
     def test_polygon_with_simplified_edges(self):
         """Test detection handles simplified straight edges correctly."""
         # Polygon with 5-unit bottom edge (simplified), but 1-unit corners
-        polygon = Polygon([
-            (0, 0), (5, 0),  # 5 units (simplified!)
-            (5, 1),          # 1 unit (corner)
-            (5, 5),          # 4 units
-            (4, 5), (3, 5), (2, 5), (1, 5), (0, 5),  # 1 unit each
-            (0, 4), (0, 3), (0, 2), (0, 1)           # 1 unit each
-        ])
+        polygon = Polygon(
+            [
+                (0, 0),
+                (5, 0),  # 5 units (simplified!)
+                (5, 1),  # 1 unit (corner)
+                (5, 5),  # 4 units
+                (4, 5),
+                (3, 5),
+                (2, 5),
+                (1, 5),
+                (0, 5),  # 1 unit each
+                (0, 4),
+                (0, 3),
+                (0, 2),
+                (0, 1),  # 1 unit each
+            ]
+        )
         segment_length = _auto_detect_segment_length(polygon)
         # Should find minimum (1.0), not first segment (5.0)
         assert segment_length == 1.0
@@ -41,11 +51,18 @@ class TestAutoDetectPixelSize:
     def test_polygon_first_segment_not_representative(self):
         """Test when first segment is much larger than pixel size."""
         # First segment is 10 units (simplified edge)
-        polygon = Polygon([
-            (0, 0), (10, 0),  # First: 10 units
-            (10, 1), (11, 1), (11, 2), (10, 2),  # Min: 1 unit
-            (10, 10), (0, 10)
-        ])
+        polygon = Polygon(
+            [
+                (0, 0),
+                (10, 0),  # First: 10 units
+                (10, 1),
+                (11, 1),
+                (11, 2),
+                (10, 2),  # Min: 1 unit
+                (10, 10),
+                (0, 10),
+            ]
+        )
         segment_length = _auto_detect_segment_length(polygon)
         # Should detect 1.0, not 10.0
         assert segment_length == 1.0
@@ -78,10 +95,15 @@ class TestAutoDetectPixelSize:
 
     def test_linestring_varying_segments(self):
         """Test LineString with varying segment lengths."""
-        line = LineString([
-            (0, 0), (10, 0),  # 10 units
-            (10, 1), (11, 1), (11, 2)  # 1 unit each
-        ])
+        line = LineString(
+            [
+                (0, 0),
+                (10, 0),  # 10 units
+                (10, 1),
+                (11, 1),
+                (11, 2),  # 1 unit each
+            ]
+        )
         segment_length = _auto_detect_segment_length(line)
         # Should find minimum (1.0)
         assert segment_length == 1.0
@@ -133,7 +155,7 @@ class TestAutoDetectPixelSize:
         geoms = [
             Polygon([(0, 0), (10, 0), (10, 10), (0, 10)]),
             Polygon([(20, 20), (21, 20), (21, 21), (20, 21)]),
-            LineString([(30, 30), (30.5, 30), (30.5, 30.5)])
+            LineString([(30, 30), (30.5, 30), (30.5, 30.5)]),
         ]
         segment_length = _auto_detect_segment_length(geoms)
         # Should find minimum across all geometries (0.5)
@@ -144,7 +166,7 @@ class TestAutoDetectPixelSize:
         geoms = [
             Polygon([(0, 0), (10, 0), (10, 10), (0, 10)]),
             Polygon([(20, 20), (21, 20), (21, 21), (20, 21)]),
-            LineString([(30, 30), (30.2, 30), (30.2, 30.2)])
+            LineString([(30, 30), (30.2, 30), (30.2, 30.2)]),
         ]
         gdf = gpd.GeoDataFrame(geometry=geoms)
         segment_length = _auto_detect_segment_length(gdf)
@@ -154,10 +176,16 @@ class TestAutoDetectPixelSize:
     def test_geodataframe_samples_first_ten(self):
         """Test that GeoDataFrame only samples first 10 geometries."""
         # Create 15 geometries, last 5 have smaller pixel size
-        geoms = [Polygon([(i, i), (i+10, i), (i+10, i+10), (i, i+10)])
-                 for i in range(10)]
-        geoms.extend([Polygon([(i, i), (i+0.1, i), (i+0.1, i+0.1), (i, i+0.1)])
-                      for i in range(100, 105)])
+        geoms = [
+            Polygon([(i, i), (i + 10, i), (i + 10, i + 10), (i, i + 10)])
+            for i in range(10)
+        ]
+        geoms.extend(
+            [
+                Polygon([(i, i), (i + 0.1, i), (i + 0.1, i + 0.1), (i, i + 0.1)])
+                for i in range(100, 105)
+            ]
+        )
         gdf = gpd.GeoDataFrame(geometry=geoms)
         segment_length = _auto_detect_segment_length(gdf)
         # Should only check first 10, so segment_length should be 10.0
@@ -205,8 +233,8 @@ class TestAutoDetectPixelSize:
         # Create polygon with 1000 vertices, all 1-unit segments
         coords = [(i, 0) for i in range(500)]
         coords.extend([(500, i) for i in range(500)])
-        coords.extend([(500-i, 500) for i in range(500)])
-        coords.extend([(0, 500-i) for i in range(500)])
+        coords.extend([(500 - i, 500) for i in range(500)])
+        coords.extend([(0, 500 - i) for i in range(500)])
         polygon = Polygon(coords[:1000])  # Take first 1000
         segment_length = _auto_detect_segment_length(polygon)
         # Should still find 1.0 even with sampling
@@ -214,10 +242,18 @@ class TestAutoDetectPixelSize:
 
     def test_fractional_segment_length(self):
         """Test detection with fractional pixel sizes."""
-        polygon = Polygon([
-            (0, 0), (0.25, 0), (0.5, 0), (0.5, 0.25),
-            (0.5, 0.5), (0.25, 0.5), (0, 0.5), (0, 0.25)
-        ])
+        polygon = Polygon(
+            [
+                (0, 0),
+                (0.25, 0),
+                (0.5, 0),
+                (0.5, 0.25),
+                (0.5, 0.5),
+                (0.25, 0.5),
+                (0, 0.5),
+                (0, 0.25),
+            ]
+        )
         segment_length = _auto_detect_segment_length(polygon)
         assert segment_length == pytest.approx(0.25, abs=1e-10)
 
@@ -225,22 +261,26 @@ class TestAutoDetectPixelSize:
         """Test with diagonal segments."""
         # Square rotated 45 degrees
         import math
+
         side = 1.0
         diag = side * math.sqrt(2)
-        polygon = Polygon([
-            (0, 0), (diag, 0), (diag, diag), (0, diag)
-        ])
+        polygon = Polygon([(0, 0), (diag, 0), (diag, diag), (0, diag)])
         segment_length = _auto_detect_segment_length(polygon)
         # All segments should be same length
         assert segment_length == pytest.approx(diag, abs=1e-10)
 
     def test_mixed_precision(self):
         """Test with mixed precision coordinates."""
-        polygon = Polygon([
-            (0.0, 0.0), (1.0000001, 0.0),
-            (1.0000001, 0.5), (1.0, 0.5),
-            (1.0, 1.0), (0.0, 1.0)
-        ])
+        polygon = Polygon(
+            [
+                (0.0, 0.0),
+                (1.0000001, 0.0),
+                (1.0000001, 0.5),
+                (1.0, 0.5),
+                (1.0, 1.0),
+                (0.0, 1.0),
+            ]
+        )
         segment_length = _auto_detect_segment_length(polygon)
         # Should find very small segment from rounding
         assert segment_length < 0.5
@@ -251,10 +291,16 @@ class TestAutoDetectEdgeCases:
 
     def test_sequence_samples_first_ten(self):
         """Test that sequences only sample first 10 items."""
-        geoms = [Polygon([(i, i), (i+10, i), (i+10, i+10), (i, i+10)])
-                 for i in range(10)]
-        geoms.extend([Polygon([(i, i), (i+0.1, i), (i+0.1, i+0.1), (i, i+0.1)])
-                      for i in range(100, 105)])
+        geoms = [
+            Polygon([(i, i), (i + 10, i), (i + 10, i + 10), (i, i + 10)])
+            for i in range(10)
+        ]
+        geoms.extend(
+            [
+                Polygon([(i, i), (i + 0.1, i), (i + 0.1, i + 0.1), (i, i + 0.1)])
+                for i in range(100, 105)
+            ]
+        )
         segment_length = _auto_detect_segment_length(geoms)
         # Should only check first 10
         assert segment_length == 10.0
@@ -265,7 +311,7 @@ class TestAutoDetectEdgeCases:
             Polygon(),
             LineString(),
             Polygon([(0, 0), (3, 0), (3, 3), (0, 3)]),
-            Polygon()
+            Polygon(),
         ]
         segment_length = _auto_detect_segment_length(geoms)
         # Should skip empties and use the valid polygon
@@ -284,31 +330,52 @@ class TestAutoDetectEdgeCases:
 
     def test_very_small_segment_length(self):
         """Test detection with very small pixel sizes."""
-        polygon = Polygon([
-            (0, 0), (0.001, 0), (0.002, 0),
-            (0.002, 0.001), (0.002, 0.002),
-            (0.001, 0.002), (0, 0.002), (0, 0.001)
-        ])
+        polygon = Polygon(
+            [
+                (0, 0),
+                (0.001, 0),
+                (0.002, 0),
+                (0.002, 0.001),
+                (0.002, 0.002),
+                (0.001, 0.002),
+                (0, 0.002),
+                (0, 0.001),
+            ]
+        )
         segment_length = _auto_detect_segment_length(polygon)
         assert segment_length == pytest.approx(0.001, abs=1e-10)
 
     def test_very_large_segment_length(self):
         """Test detection with very large pixel sizes."""
-        polygon = Polygon([
-            (0, 0), (1000, 0), (2000, 0),
-            (2000, 1000), (2000, 2000),
-            (1000, 2000), (0, 2000), (0, 1000)
-        ])
+        polygon = Polygon(
+            [
+                (0, 0),
+                (1000, 0),
+                (2000, 0),
+                (2000, 1000),
+                (2000, 2000),
+                (1000, 2000),
+                (0, 2000),
+                (0, 1000),
+            ]
+        )
         segment_length = _auto_detect_segment_length(polygon)
         assert segment_length == 1000.0
 
     def test_irregular_polygon(self):
         """Test with irregular polygon (non-rectangular)."""
         # Triangle with varying segment lengths
-        polygon = Polygon([
-            (0, 0), (1, 0), (2, 0), (3, 0),  # 1-unit segments
-            (2, 1), (1, 2), (0, 3)            # Longer diagonal segments
-        ])
+        polygon = Polygon(
+            [
+                (0, 0),
+                (1, 0),
+                (2, 0),
+                (3, 0),  # 1-unit segments
+                (2, 1),
+                (1, 2),
+                (0, 3),  # Longer diagonal segments
+            ]
+        )
         segment_length = _auto_detect_segment_length(polygon)
         # Should find 1.0 from bottom edge
         assert segment_length == 1.0
