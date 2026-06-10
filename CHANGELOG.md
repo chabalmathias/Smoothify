@@ -4,6 +4,9 @@ All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
 
+### Fixed
+- Fixed shapes with long straight edges being massively over-rounded (e.g. a large square with a small `segment_length` collapsed into a circle). The simplify steps strip all collinear vertices from straight edges, and Chaikin's corner cuts scale with segment length, so corner rounding grew with edge length instead of `segment_length`. Geometries are now re-segmentized after each simplify step, capping corner rounding at roughly `segment_length` while still smoothing raster staircase artifacts into curves. Applies to all geometry types. Note: outputs are somewhat denser (more vertices) and smoothing is ~20% slower on typical raster-derived data.
+
 ## [0.2.3] - 2026-06-02
 
 ### Added

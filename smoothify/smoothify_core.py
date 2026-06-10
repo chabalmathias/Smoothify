@@ -14,6 +14,13 @@ from shapely.geometry import (
 from shapely.geometry.base import BaseGeometry
 from shapely.ops import unary_union
 
+# Chaikin's corner cut moves a right-angle vertex inward by ~1/4 of the
+# adjacent segment length, so smoothing segments of FACTOR * segment_length
+# deviates at most ~segment_length at a right angle — the same deviation
+# budget the simplify(segment_length) step already allows — while letting
+# shallow facet chains (e.g. simplified curves) blend into smooth curves.
+_CHAIKIN_SEGMENT_FACTOR = 4
+
 
 def _chaikin_corner_cutting(
     geom: Polygon | LineString, num_iterations: int = 1, reverse: bool = False
@@ -270,10 +277,14 @@ def _smoothify_geometry(
     This is the main smoothing algorithm that:
     1. Adds intermediate vertices along line segments (segmentize)
     2. Generates multiple rotated variants (for Polygons) to avoid artifacts
-    3. Simplifies each variant to remove noise
+    3. Simplifies each variant to remove noise, then re-segmentizes so no
+       segment exceeds segment_length * _CHAIKIN_SEGMENT_FACTOR (simplify
+       strips collinear vertices, and Chaikin's corner cuts scale with
+       segment length — unbounded segments would over-round sharp corners)
     4. Applies Chaikin corner cutting to smooth
     5. Merges all variants via union to eliminate start-point artifacts
-    6. Applies final smoothing pass
+    6. Simplifies the merged result and re-segmentizes again, then applies
+       a final smoothing pass
     7. Optionally restores original area via buffering (for Polygons)"""
 
     if geom.geom_type == "Polygon":
@@ -292,10 +303,15 @@ def _smoothify_geometry(
             geom_segmented, n_starting_points=4
         )
         for moved_start in starting_point_geoms:
+            # Simplify strips noise below segment_length, but on straight edges
+            # it also strips every densified vertex, leaving arbitrarily long
+            # segments. Chaikin cuts corners at 1/4 of each segment's length,
+            # so re-segmentize afterwards to cap the rounding at segment_length
+            # scale.
             moved_start = moved_start.simplify(
                 tolerance=segment_length,
                 preserve_topology=True,
-            )
+            ).segmentize(segment_length * _CHAIKIN_SEGMENT_FACTOR)
             moved_start = cast(Polygon, moved_start)
             for reverse in [False, True]:
                 smoothed = _chaikin_corner_cutting(
@@ -309,7 +325,7 @@ def _smoothify_geometry(
         moved_start = geom_segmented.simplify(
             tolerance=segment_length,
             preserve_topology=True,
-        )
+        ).segmentize(segment_length * _CHAIKIN_SEGMENT_FACTOR)
         moved_start = cast(LineString, moved_start)
         smoothed = _chaikin_corner_cutting(
             geom=moved_start,
@@ -341,6 +357,12 @@ def _smoothify_geometry(
     assert isinstance(dissolved_poly, (Polygon, LineString)), (
         f"Resulting geometry must be Polygon or LineString. Got {type(dissolved_poly)}."
     )
+
+    # The simplify above can again leave long segments on straight stretches
+    # (a Chaikin-rounded corner deviates < segment_length / 5 from the sharp
+    # original, so simplify removes it entirely); re-segmentize so the final
+    # Chaikin pass cannot re-round at a larger scale.
+    dissolved_poly = dissolved_poly.segmentize(segment_length * _CHAIKIN_SEGMENT_FACTOR)
 
     smoothed_geom = _chaikin_corner_cutting(
         geom=dissolved_poly,
