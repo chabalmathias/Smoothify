@@ -13,6 +13,10 @@ All notable changes to this project will be documented in this file.
   - The area-preservation root finder brackets the root from one side using its linear estimate, caches evaluations, and uses a step tolerance derived from the area tolerance via the perimeter, roughly halving the number of buffer operations.
   - Congruent geometries (translated copies of the same shape, common in raster-derived data) are now smoothed once and the result translated to each occurrence; this also reduces work dispatched to parallel workers.
 
+### Added
+- New `merge_holes` option (default `True`): holes that touch or nearly touch (e.g. diagonally adjacent raster cells) are joined before smoothing, so they smooth into one coherent opening instead of separate overlapping shapes leaving a fake land bridge. Pass `merge_holes=False` for the previous per-hole behaviour. Mirrors what `merge_multipolygons` does for shells.
+- `examples/merge_holes_examples.ipynb`: worked examples of `merge_holes` and its interplay with `merge_collection` (touching holes, overlapping donuts, holes split across features).
+
 ### Fixed
 - Fixed sharp concave folds in smoothed output on shapes with features about one `segment_length` wide (e.g. a hole with a one-pixel-wide arm, as produced by `merge_holes` joining a small hole to a larger one). The start-point smoothing variants can disagree about such features, leaving a forked slit in their union that the area-preservation shrink sharpens into a cusp. The final result is now checked for sharp concave turns and, when one is found, recomputed from the variant union sealed with a small closing (dilate-erode at `segment_length / 4`).
 - Fixed sharp cusps where a smoothed hole crosses the independently smoothed exterior and gets clipped by the hole subtraction (previously up to a 180-degree fold at the tangential crossing points). When detected, the result is repaired with a small opening + closing (at `segment_length / 4`), which removes hair-thin material needles and seals thin slits without visibly moving the boundary.

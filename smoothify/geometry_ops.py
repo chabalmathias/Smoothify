@@ -145,6 +145,7 @@ def _smoothify_multipolygon(
     merge_multipolygons: bool,
     preserve_area: bool,
     area_tolerance: float = 0.01,
+    merge_holes: bool = True,
 ) -> MultiPolygon:
     """Smooth a MultiPolygon, optionally merging adjacent polygons first.
 
@@ -175,6 +176,7 @@ def _smoothify_multipolygon(
             smooth_iterations=smooth_iterations,
             preserve_area=preserve_area,
             area_tolerance=area_tolerance,
+            merge_holes=merge_holes,
         )
         for polygon in polygons
     ]
@@ -233,15 +235,43 @@ def _smoothify_polygon(
     smooth_iterations: int = 3,
     preserve_area: bool = True,
     area_tolerance: float = 0.01,
+    merge_holes: bool = True,
 ) -> Polygon | MultiPolygon:
     """Smooth a Polygon while preserving interior holes.
 
     Smooths the exterior shell and each interior hole independently, then
     recombines them. This approach prevents artifacts at hole boundaries and
     maintains proper polygon topology. May return a MultiPolygon if hole
-    subtraction splits the polygon."""
+    subtraction splits the polygon.
+
+    If merge_holes is True, holes that touch or nearly touch (e.g. diagonally
+    adjacent raster cells) are joined before smoothing, so they smooth into
+    one coherent opening instead of separate overlapping blobs."""
 
     holes, filled_polygon = _extract_and_fill_holes(geom)
+
+    if merge_holes and len(holes) > 1:
+        # Join with a larger epsilon than _join_adjacent's segment_length /
+        # 1000: the GeoDataFrame merge step pre-buffers features outward by
+        # that amount, which shrinks holes and pulls corner-touching holes
+        # apart by twice it — an equal join buffer would only restore point
+        # contact. Still negligible (~4 cm for 10 m pixels).
+        buffered = [
+            hole.buffer(segment_length / 250, join_style="mitre") for hole in holes
+        ]
+        joined = unary_union(buffered)
+        parts = list(joined.geoms) if isinstance(joined, MultiPolygon) else [joined]
+        # Keep the original (un-buffered) hole wherever nothing merged, so
+        # the join epsilon never leaks into area preservation of lone holes.
+        new_holes = []
+        for part in parts:
+            if not isinstance(part, Polygon):
+                continue
+            members = [
+                h for h, b in zip(holes, buffered, strict=True) if b.intersects(part)
+            ]
+            new_holes.append(members[0] if len(members) == 1 else part)
+        holes = new_holes
 
     smooth_polygon = _smoothify_geometry(
         geom=filled_polygon,
@@ -351,6 +381,7 @@ def _smoothify_geodataframe(
     preserve_area: bool,
     area_tolerance: float = 0.01,
     merge_field: Optional[str] = None,
+    merge_holes: bool = True,
 ) -> gpd.GeoDataFrame:
     """Smooth all geometries in a GeoDataFrame with optional parallel processing.
 
@@ -406,6 +437,7 @@ def _smoothify_geodataframe(
         merge_multipolygons=merge_multipolygons,
         preserve_area=preserve_area,
         area_tolerance=area_tolerance,
+        merge_holes=merge_holes,
     )
 
     def run_batch(geoms: list[BaseGeometry]) -> list[BaseGeometry]:
@@ -438,6 +470,7 @@ def _smoothify_single(
     merge_multipolygons: bool,
     preserve_area: bool,
     area_tolerance: float = 0.01,
+    merge_holes: bool = True,
 ) -> BaseGeometry:
     """Smooth a single geometry by dispatching to the appropriate type-specific function.
 
@@ -470,6 +503,7 @@ def _smoothify_single(
             smooth_iterations=smooth_iterations,
             preserve_area=preserve_area,
             area_tolerance=area_tolerance,
+            merge_holes=merge_holes,
         )
     elif isinstance(geom, LinearRing):
         return _smoothify_linearing(
@@ -493,6 +527,7 @@ def _smoothify_single(
             merge_multipolygons=merge_multipolygons,
             preserve_area=preserve_area,
             area_tolerance=area_tolerance,
+            merge_holes=merge_holes,
         )
     elif isinstance(geom, MultiLineString):
         return _smoothify_multilinestring(
@@ -513,6 +548,7 @@ def _smoothify_bulk(
     merge_multipolygons: bool,
     preserve_area: bool,
     area_tolerance: float = 0.01,
+    merge_holes: bool = True,
 ) -> GeometryCollection | MultiPolygon | MultiLineString:
     """Smooth a collection of geometries using parallel processing.
 
@@ -554,6 +590,7 @@ def _smoothify_bulk(
         merge_multipolygons=merge_multipolygons,
         preserve_area=preserve_area,
         area_tolerance=area_tolerance,
+        merge_holes=merge_holes,
     )
 
     def run_batch(geoms: list[BaseGeometry]) -> list[BaseGeometry]:
