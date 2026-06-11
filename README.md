@@ -198,6 +198,10 @@ smoothed = smoothify(
 
 Smoothify uses an advanced multi-step smoothing pipeline:
 
+<p align="left">
+  <img src="https://raw.githubusercontent.com/DPIRD-DMA/Smoothify/main/images/pipeline_steps.png" alt="Smoothify pipeline steps" width="800">
+</p>
+
 
 1. Joins touching holes (for Polygons, when `merge_holes=True`) so they smooth as one opening
 2. Adds intermediate vertices along line segments (segmentize)
