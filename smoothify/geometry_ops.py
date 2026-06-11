@@ -21,7 +21,13 @@ from shapely.geometry import (
 from shapely.geometry.base import BaseGeometry
 from shapely.ops import unary_union
 
-from .smoothify_core import _join_adjacent, _smoothify_geometry
+from shapely import make_valid
+
+from .smoothify_core import (
+    _join_adjacent,
+    _max_concave_turn_degrees,
+    _smoothify_geometry,
+)
 
 _INVALID_GEOM_HINT = (
     "Repair it first with shapely's make_valid() "
@@ -266,6 +272,23 @@ def _smoothify_polygon(
             smooth_polygon = smooth_polygon.difference(
                 unary_union(smoothed_hole_polygons)
             )
+            # A smoothed hole can cross the independently smoothed exterior;
+            # the difference then clips it, leaving sharp concave cusps at
+            # the (often tangential) crossing points. Repair with a small
+            # opening (erode-dilate: removes hair-thin material needles
+            # between hole rim and boundary) followed by a closing
+            # (dilate-erode: seals thin slits) — both deviate at most their
+            # radius and only at sub-smoothing-scale features.
+            if _max_concave_turn_degrees(smooth_polygon) > 60:
+                radius = segment_length / 4
+                repaired = (
+                    smooth_polygon.buffer(-radius)
+                    .buffer(radius)
+                    .buffer(radius)
+                    .buffer(-radius)
+                )
+                if not repaired.is_empty:
+                    smooth_polygon = make_valid(repaired)
 
     return cast("Polygon | MultiPolygon", smooth_polygon)
 

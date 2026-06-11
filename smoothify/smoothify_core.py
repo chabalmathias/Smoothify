@@ -78,6 +78,40 @@ def _chaikin_corner_cutting(
     return LineString(points) if isinstance(geom, LineString) else Polygon(points)
 
 
+def _max_concave_turn_degrees(geom: BaseGeometry) -> float:
+    """Sharpest concave (inward) turn angle in degrees across all rings.
+
+    A correctly smoothed polygon is everywhere gently curved on the concave
+    side; thin features may legitimately end in sharp convex hairpins, but a
+    sharp concave turn means a fold/slit (e.g. from smoothing variants that
+    disagreed about a feature near the simplify tolerance)."""
+
+    polys = geom.geoms if isinstance(geom, MultiPolygon) else [geom]
+    worst = 0.0
+    for poly in polys:
+        if not isinstance(poly, Polygon):
+            continue
+        for ring in [poly.exterior, *poly.interiors]:
+            coords = np.asarray(ring.coords)[:-1, :2]
+            if len(coords) < 4:
+                continue
+            vectors = np.diff(np.vstack([coords, coords[:2]]), axis=0)
+            cross = vectors[:-1, 0] * vectors[1:, 1] - vectors[:-1, 1] * vectors[1:, 0]
+            dot = (vectors[:-1] * vectors[1:]).sum(axis=1)
+            # Shoelace sign gives ring orientation; turns with cross sign
+            # opposite to it are concave (material on the inside of the bend)
+            orientation = np.sign(
+                np.dot(coords[:, 0], np.roll(coords[:, 1], -1))
+                - np.dot(coords[:, 1], np.roll(coords[:, 0], -1))
+            )
+            concave = cross * orientation < 0
+            if not concave.any():
+                continue
+            angles = np.degrees(np.arctan2(np.abs(cross[concave]), dot[concave]))
+            worst = max(worst, float(angles.max()))
+    return worst
+
+
 def _rotate_ring_coords(ring: LinearRing, shift: float) -> "npt.NDArray[np.float64]":
     """Rotate a linear ring coordinate sequence by a fractional shift.
 
@@ -360,10 +394,13 @@ def _smoothify_geometry(
         )
         geom_iterations.append(smoothed)
 
+    dissolved: BaseGeometry | None = None
     if isinstance(geom, Polygon):
         geom_iterations = [make_valid(g) for g in geom_iterations]
 
-        dissolved_poly = make_valid(unary_union(geom_iterations)).simplify(
+        dissolved = make_valid(unary_union(geom_iterations))
+
+        dissolved_poly = dissolved.simplify(
             tolerance=segment_length / 5,
             preserve_topology=True,
         )
@@ -395,19 +432,52 @@ def _smoothify_geometry(
         geom=dissolved_poly,
         num_iterations=smooth_iterations,
     )
-    if (
-        original_area is not None
-        and isinstance(smoothed_geom, Polygon)
-        and preserve_area
-    ):
-        # Convert percentage to absolute tolerance based on original area
-        # area_tolerance is percentage (e.g., 0.01 = 0.01% error = 99.99% preservation)
-        absolute_tolerance = original_area * (area_tolerance / 100.0)
 
-        smoothed_geom = _preserve_area_with_buffer(
-            polygon=smoothed_geom,
-            target_area=original_area,
-            tolerance=absolute_tolerance,
+    def finish(candidate: Polygon | LineString) -> Polygon | LineString:
+        """Apply the optional area-preservation step to a smoothed result."""
+        if (
+            original_area is not None
+            and isinstance(candidate, Polygon)
+            and preserve_area
+        ):
+            # Convert percentage to absolute tolerance based on original area
+            # (e.g. area_tolerance 0.01 = 0.01% error = 99.99% preservation)
+            absolute_tolerance = original_area * (area_tolerance / 100.0)
+            return _preserve_area_with_buffer(
+                polygon=candidate,
+                target_area=original_area,
+                tolerance=absolute_tolerance,
+            )
+        return candidate
+
+    smoothed_geom = finish(smoothed_geom)
+
+    # Variants can disagree about features near the simplify tolerance (e.g.
+    # arms ~one segment_length wide collapse differently per start anchor);
+    # their union then carries a forked slit that survives as a fold, which
+    # the area-preservation shrink can sharpen further into a cusp. A
+    # correctly smoothed result is gently curved on the concave side (thin
+    # arms may end in legitimate sharp convex hairpins), so on a sharp
+    # concave turn redo the final pass with a small closing (dilate-erode)
+    # sealing the union — it deviates at most its radius and only at
+    # high-curvature concave spots.
+    if (
+        dissolved is not None
+        and isinstance(smoothed_geom, Polygon)
+        and _max_concave_turn_degrees(smoothed_geom) > 60
+    ):
+        radius = segment_length / 4
+        sealed = make_valid(dissolved.buffer(radius).buffer(-radius)).simplify(
+            tolerance=segment_length / 5,
+            preserve_topology=True,
         )
+        if isinstance(sealed, MultiPolygon):
+            sealed = max(sealed.geoms, key=lambda x: x.area)
+        if isinstance(sealed, Polygon):
+            resmoothed = _chaikin_corner_cutting(
+                geom=sealed.segmentize(segment_length * _CHAIKIN_SEGMENT_FACTOR),
+                num_iterations=smooth_iterations,
+            )
+            smoothed_geom = finish(resmoothed)
 
     return smoothed_geom

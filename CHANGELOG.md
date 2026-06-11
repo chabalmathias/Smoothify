@@ -5,7 +5,7 @@ All notable changes to this project will be documented in this file.
 ## [Unreleased]
 
 ### Changed
-- Single-core smoothing is ~3.5x faster on typical raster-derived data (benchmarked on `examples/Water.gpkg`: 6.8s → 1.9s). Output differences are sub-pixel (bounded by the algorithm's own start-point noise floor); area preservation accuracy is unchanged or slightly better. The main changes:
+- Single-core smoothing is ~3.5x faster on typical raster-derived data (benchmarked on `examples/Water.gpkg`: 6.8s → 1.9s, including the cost of the new fold-repair check below). Output differences are sub-pixel (bounded by the algorithm's own start-point noise floor); area preservation accuracy is unchanged or slightly better. The main changes:
   - Removed the reversed-direction smoothing variants for polygons: Chaikin corner cutting is direction-invariant on closed rings, so they duplicated the forward variants bit-for-bit and only inflated the variant union (output unchanged).
   - Holes are now subtracted in a single `difference` call against their union instead of one `intersection` + `difference` pair per hole (output unchanged).
   - The tiny merge/dissolve buffer now uses mitre joins, which keep corners as single vertices instead of adding ~8 arc vertices per corner (boundary differences at the millimetre scale of the buffer itself).
@@ -14,6 +14,8 @@ All notable changes to this project will be documented in this file.
   - Congruent geometries (translated copies of the same shape, common in raster-derived data) are now smoothed once and the result translated to each occurrence; this also reduces work dispatched to parallel workers.
 
 ### Fixed
+- Fixed sharp concave folds in smoothed output on shapes with features about one `segment_length` wide (e.g. a hole with a one-pixel-wide arm, as produced by `merge_holes` joining a small hole to a larger one). The start-point smoothing variants can disagree about such features, leaving a forked slit in their union that the area-preservation shrink sharpens into a cusp. The final result is now checked for sharp concave turns and, when one is found, recomputed from the variant union sealed with a small closing (dilate-erode at `segment_length / 4`).
+- Fixed sharp cusps where a smoothed hole crosses the independently smoothed exterior and gets clipped by the hole subtraction (previously up to a 180-degree fold at the tangential crossing points). When detected, the result is repaired with a small opening + closing (at `segment_length / 4`), which removes hair-thin material needles and seals thin slits without visibly moving the boundary.
 - Fixed shapes with long straight edges being massively over-rounded (e.g. a large square with a small `segment_length` collapsed into a circle). The simplify steps strip all collinear vertices from straight edges, and Chaikin's corner cuts scale with segment length, so corner rounding grew with edge length instead of `segment_length`. Geometries are now re-segmentized after each simplify step, capping corner rounding at roughly `segment_length` while still smoothing raster staircase artifacts into curves. Applies to all geometry types. Note: outputs are somewhat denser (more vertices) and smoothing is ~20% slower on typical raster-derived data.
 
 ## [0.2.3] - 2026-06-02
