@@ -27,17 +27,23 @@ from smoothify.smoothify_core import (
 OUT = Path(__file__).parent / "pipeline_steps.png"
 SEGMENT_LENGTH = 1.0  # "pixel size" of the demo shape
 VARIANT_COLORS = ["#d62728", "#1f77b4", "#2ca02c", "#9467bd"]
+# distinct linestyles so variants stay individually visible even where
+# their outlines coincide
+VARIANT_STYLES = ["-", "--", "-.", ":"]
 
 
 def pixel_blob() -> Polygon:
     """A pond-like raster blob: a smooth shape rasterized at pixel size 1.
 
     Rasterizing a real curve gives an authentic staircase boundary at a
-    realistic feature-to-pixel ratio (~20 pixels across)."""
-    xs, ys = np.meshgrid(np.arange(24), np.arange(18))
+    realistic feature-to-pixel ratio (~20 pixels across). The lobe placement
+    is chosen so all four start-point variants simplify to visibly different
+    polygons (rotated anchors can otherwise land where two variants come out
+    identical and overprint in the figure)."""
+    xs, ys = np.meshgrid(np.arange(26), np.arange(20))
     cx, cy = xs + 0.5, ys + 0.5
-    lobe_a = ((cx - 9) / 8.0) ** 2 + ((cy - 8) / 6.0) ** 2 < 1
-    lobe_b = ((cx - 17) / 6.0) ** 2 + ((cy - 11) / 4.5) ** 2 < 1
+    lobe_a = ((cx - 8.5) / 8.0) ** 2 + ((cy - 8) / 6.0) ** 2 < 1
+    lobe_b = ((cx - 16) / 6.0) ** 2 + ((cy - 10.5) / 4.5) ** 2 < 1
     grid = lobe_a | lobe_b
     squares = [
         Polygon([(x, y), (x + 1, y), (x + 1, y + 1), (x, y + 1)])
@@ -48,15 +54,15 @@ def pixel_blob() -> Polygon:
     return merged
 
 
-def draw(ax, geom, color="black", lw=1.8, dots=False, alpha=1.0, label=None):
+def draw(ax, geom, color="black", lw=1.8, dots=False, alpha=1.0, style="-"):
     xs, ys = geom.exterior.xy
     ax.plot(
         xs,
         ys,
+        style,
         color=color,
         linewidth=lw,
         alpha=alpha,
-        label=label,
         solid_capstyle="round",
     )
     if dots:
@@ -120,14 +126,14 @@ def main() -> None:
 
     ax = panels[2]
     reference(ax, original)
-    for v, c in zip(variants, VARIANT_COLORS, strict=True):
-        draw(ax, v, color=c, lw=1.4, alpha=0.85)
+    for v, c, s in zip(variants, VARIANT_COLORS, VARIANT_STYLES, strict=True):
+        draw(ax, v, color=c, lw=1.6, alpha=0.9, style=s)
     ax.set_title("3. Rotate start point 4 ways,\nsimplify each variant")
 
     ax = panels[3]
     reference(ax, original)
-    for v, c in zip(smoothed_variants, VARIANT_COLORS, strict=True):
-        draw(ax, v, color=c, lw=1.4, alpha=0.85)
+    for v, c, s in zip(smoothed_variants, VARIANT_COLORS, VARIANT_STYLES, strict=True):
+        draw(ax, v, color=c, lw=1.6, alpha=0.9, style=s)
     ax.set_title("4. Chaikin corner cutting\nper variant")
 
     ax = panels[4]
