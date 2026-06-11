@@ -235,7 +235,7 @@ smoothed = smoothify(make_valid(polygon), segment_length=1.0)
 - **Duplicate Shapes**: Geometries that are translated copies of the same shape (common in raster-derived data, e.g. single-pixel polygons) are automatically smoothed once and the result reused
 - **Smoothing Iterations**: Values of 3-5 typically provide good results. Higher values create smoother output but increase processing time and vertex count
 - **Memory Usage**: Scales with geometry complexity. The algorithm creates multiple variants during smoothing
-- **Optimal segment_length**: Should match the original raster cell size (pixel size) or be slightly larger for best results
+- **Optimal segment_length**: Anything from about half the original raster pixel size and up should produce reasonable output — larger values produce more rounded output, smaller values stay more faithful to the original geometry
 
 ## Running the Tests
 
