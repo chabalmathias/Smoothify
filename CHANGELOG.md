@@ -16,6 +16,7 @@ All notable changes to this project will be documented in this file.
 ### Added
 - New `merge_holes` option (default `True`): holes that touch or nearly touch (e.g. diagonally adjacent raster cells) are joined before smoothing, so they smooth into one coherent opening instead of separate overlapping shapes leaving a fake land bridge. Pass `merge_holes=False` for the previous per-hole behaviour. Mirrors what `merge_multipolygons` does for shells.
 - `examples/merge_holes_examples.ipynb`: worked examples of `merge_holes` and its interplay with `merge_collection` (touching holes, overlapping donuts, holes split across features).
+- `benchmarks/bench_water.py`: single-core timing/profiling benchmark with baseline output comparison.
 
 ### Fixed
 - Fixed sharp concave folds in smoothed output on shapes with features about one `segment_length` wide (e.g. a hole with a one-pixel-wide arm, as produced by `merge_holes` joining a small hole to a larger one). The start-point smoothing variants can disagree about such features, leaving a forked slit in their union that the area-preservation shrink sharpens into a cusp. The final result is now checked for sharp concave turns and, when one is found, recomputed from the variant union sealed with a small closing (dilate-erode at `segment_length / 4`).
