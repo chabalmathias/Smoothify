@@ -181,16 +181,29 @@ def _preserve_area_with_buffer(
     perimeter = polygon.length
     initial_guess = (target_area - current_area) / perimeter if perimeter > 0 else 0
 
+    # Cache evaluations: brentq re-evaluates the bracket endpoints, and
+    # buffer(0) at the known endpoint costs a full (pointless) GEOS buffer.
+    _cache: dict[float, float] = {0.0: current_area - target_area}
+
     def area_delta(distance: float) -> float:
-        buffered_polygon = polygon.buffer(distance)
-        return float(buffered_polygon.area - target_area)
+        cached = _cache.get(distance)
+        if cached is not None:
+            return cached
+        result = float(polygon.buffer(distance).area - target_area)
+        _cache[distance] = result
+        return result
 
-    scale = (
-        abs(initial_guess) * 2 if initial_guess != 0 else (polygon.area / 3.1416) ** 0.5
-    )
-    max_distance = max(0.1, scale)
+    # Buffered area is monotonic in distance and f(0) = current - target is
+    # known for free, so bracket one-sided from the linear estimate instead
+    # of buffering both sides of a symmetric interval.
+    if initial_guess != 0:
+        far = initial_guess * 1.2
+        lo, hi = (0.0, far) if far > 0 else (far, 0.0)
+    else:
+        scale = (polygon.area / 3.1416) ** 0.5
+        max_distance = max(0.1, scale)
+        lo, hi = -max_distance, max_distance
 
-    lo, hi = -max_distance, max_distance
     f_lo, f_hi = area_delta(lo), area_delta(hi)
 
     for _ in range(20):
@@ -201,10 +214,13 @@ def _preserve_area_with_buffer(
         f_lo, f_hi = area_delta(lo), area_delta(hi)
 
     try:
-        # Use brentq to find optimal buffer distance
-        # xtol controls precision of buffer distance finding, not area precision
-        # Use a reasonable xtol relative to the search space
-        xtol = min(tolerance * 0.01, (hi - lo) * 0.001)
+        # Use brentq to find optimal buffer distance.
+        # xtol is in distance units while tolerance is in area units; since
+        # d(area)/d(distance) ~= perimeter, a distance error of
+        # tolerance / perimeter corresponds to an area error of ~tolerance.
+        # Aim an order of magnitude below that so the verification below
+        # rarely needs a second pass.
+        xtol = tolerance / perimeter * 0.1 if perimeter > 0 else (hi - lo) * 0.001
         optimal_distance = cast(float, brentq(area_delta, lo, hi, xtol=xtol))
         result = polygon.buffer(optimal_distance)
 
@@ -256,7 +272,9 @@ def _join_adjacent(
         # If the geometry is not a polygon type, return it unchanged
         return geom_combined
 
-    merged_geom = geom_combined.buffer(segment_length / 1000)
+    # Mitre join keeps corners as single vertices (round joins add ~8 vertices
+    # per corner, inflating the union for no visible gain at this tiny buffer)
+    merged_geom = geom_combined.buffer(segment_length / 1000, join_style="mitre")
     merged_geom = unary_union(merged_geom)
 
     if other_types:
@@ -313,13 +331,22 @@ def _smoothify_geometry(
                 preserve_topology=True,
             ).segmentize(segment_length * _CHAIKIN_SEGMENT_FACTOR)
             moved_start = cast(Polygon, moved_start)
-            for reverse in [False, True]:
-                smoothed = _chaikin_corner_cutting(
-                    geom=moved_start,
-                    num_iterations=smooth_iterations,
-                    reverse=reverse,
-                )
-                geom_iterations.append(smoothed)
+            # No reversed pass: on closed rings Chaikin is direction-invariant
+            # (each edge {a, b} yields the same cut points 0.75a + 0.25b and
+            # 0.25a + 0.75b either way), so a reversed variant duplicates the
+            # forward one bit-for-bit and only inflates the union below.
+            #
+            # Cap pre-union iterations at 2: the merged result is simplified
+            # at segment_length / 5 below, which erases detail finer than
+            # iteration 3+ adds (cuts beyond iteration 2 move the boundary by
+            # less than that tolerance), while each extra iteration doubles
+            # the vertex count entering the expensive union. The final
+            # post-union pass still runs the full smooth_iterations.
+            smoothed = _chaikin_corner_cutting(
+                geom=moved_start,
+                num_iterations=min(smooth_iterations, 2),
+            )
+            geom_iterations.append(smoothed)
 
     else:
         moved_start = geom_segmented.simplify(
