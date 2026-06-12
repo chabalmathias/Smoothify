@@ -1,10 +1,13 @@
+import hashlib
 import warnings
 from functools import partial
 from multiprocessing import get_context
-from typing import Optional, Sequence, cast
+from typing import Callable, Optional, Sequence, cast
 
 import geopandas as gpd
+import numpy as np
 import pandas as pd
+import shapely
 from joblib import Parallel, delayed
 from shapely.geometry import (
     GeometryCollection,
@@ -16,8 +19,15 @@ from shapely.geometry import (
     Polygon,
 )
 from shapely.geometry.base import BaseGeometry
+from shapely.ops import unary_union
 
-from .smoothify_core import _join_adjacent, _smoothify_geometry
+from shapely import make_valid
+
+from .smoothify_core import (
+    _join_adjacent,
+    _max_concave_turn_degrees,
+    _smoothify_geometry,
+)
 
 _INVALID_GEOM_HINT = (
     "Repair it first with shapely's make_valid() "
@@ -63,6 +73,71 @@ def _partition_valid(
     return valid, invalid
 
 
+def _smooth_deduplicated(
+    geoms: Sequence[BaseGeometry],
+    run_batch: Callable[[list[BaseGeometry]], list[BaseGeometry]],
+) -> list[BaseGeometry]:
+    """Smooth geometries, computing each congruent shape only once.
+
+    Raster-derived datasets typically contain many translated copies of the
+    same shape (e.g. single-pixel polygons). Smoothing commutes with
+    translation, so congruent geometries are grouped by their origin-
+    normalized coordinates, one representative per group is smoothed (via
+    run_batch, which may be serial or parallel), and the result is translated
+    back to each occurrence."""
+
+    rep_indices: list[int] = []
+    key_to_rep: dict[tuple[str, int, bytes], int] = {}
+    # per input geometry: (representative position, translation offset)
+    plan: list[tuple[int, "np.ndarray"]] = []
+
+    for i, geom in enumerate(geoms):
+        coords = shapely.get_coordinates(geom)
+        if len(coords) == 0 or shapely.has_z(geom):
+            # Empty geometry: nothing to normalize. 3D geometry: the key
+            # hashes XY only and the translate-back drops Z, so XY-congruent
+            # geometries with different Z would silently swap or lose their
+            # Z values — smooth these directly instead.
+            rep_indices.append(i)
+            plan.append((len(rep_indices) - 1, np.zeros(2)))
+            continue
+        mins = coords.min(axis=0)
+        # Ring/part boundaries are not encoded in the flat coordinate dump,
+        # so include the interior ring count to keep keys unambiguous.
+        n_rings = (
+            shapely.get_num_interior_rings(geom) if isinstance(geom, Polygon) else 0
+        )
+        # Key on a digest rather than the raw coordinate bytes: the keys live
+        # for the whole batch, and raw keys would hold ~1.6x the dataset's
+        # coordinate memory on large GeoDataFrames of distinct shapes. A
+        # 16-byte BLAKE2b digest makes key memory independent of geometry
+        # size (collision odds ~1e-24).
+        digest = hashlib.blake2b(
+            (coords - mins).tobytes(), digest_size=16
+        ).digest()
+        key = (geom.geom_type, int(n_rings), digest)
+        rep_pos = key_to_rep.get(key)
+        if rep_pos is None:
+            rep_indices.append(i)
+            rep_pos = len(rep_indices) - 1
+            key_to_rep[key] = rep_pos
+            plan.append((rep_pos, np.zeros(2)))
+        else:
+            rep_mins = shapely.get_coordinates(geoms[rep_indices[rep_pos]]).min(axis=0)
+            plan.append((rep_pos, mins - rep_mins))
+
+    smoothed_reps = run_batch([geoms[i] for i in rep_indices])
+
+    results: list[BaseGeometry] = []
+    for rep_pos, offset in plan:
+        rep_result = smoothed_reps[rep_pos]
+        if offset[0] == 0 and offset[1] == 0:
+            results.append(rep_result)
+        else:
+            results.append(shapely.transform(rep_result, lambda c, o=offset: c + o))
+    return results
+
+
 def _smoothify_multipolygon(
     geom: BaseGeometry,
     segment_length: float,
@@ -70,6 +145,7 @@ def _smoothify_multipolygon(
     merge_multipolygons: bool,
     preserve_area: bool,
     area_tolerance: float = 0.01,
+    merge_holes: bool = True,
 ) -> MultiPolygon:
     """Smooth a MultiPolygon, optionally merging adjacent polygons first.
 
@@ -100,6 +176,7 @@ def _smoothify_multipolygon(
             smooth_iterations=smooth_iterations,
             preserve_area=preserve_area,
             area_tolerance=area_tolerance,
+            merge_holes=merge_holes,
         )
         for polygon in polygons
     ]
@@ -158,15 +235,43 @@ def _smoothify_polygon(
     smooth_iterations: int = 3,
     preserve_area: bool = True,
     area_tolerance: float = 0.01,
+    merge_holes: bool = True,
 ) -> Polygon | MultiPolygon:
     """Smooth a Polygon while preserving interior holes.
 
     Smooths the exterior shell and each interior hole independently, then
     recombines them. This approach prevents artifacts at hole boundaries and
     maintains proper polygon topology. May return a MultiPolygon if hole
-    subtraction splits the polygon."""
+    subtraction splits the polygon.
+
+    If merge_holes is True, holes that touch or nearly touch (e.g. diagonally
+    adjacent raster cells) are joined before smoothing, so they smooth into
+    one coherent opening instead of separate overlapping blobs."""
 
     holes, filled_polygon = _extract_and_fill_holes(geom)
+
+    if merge_holes and len(holes) > 1:
+        # Join with a larger epsilon than _join_adjacent's segment_length /
+        # 1000: the GeoDataFrame merge step pre-buffers features outward by
+        # that amount, which shrinks holes and pulls corner-touching holes
+        # apart by twice it — an equal join buffer would only restore point
+        # contact. Still negligible (~4 cm for 10 m pixels).
+        buffered = [
+            hole.buffer(segment_length / 250, join_style="mitre") for hole in holes
+        ]
+        joined = unary_union(buffered)
+        parts = list(joined.geoms) if isinstance(joined, MultiPolygon) else [joined]
+        # Keep the original (un-buffered) hole wherever nothing merged, so
+        # the join epsilon never leaks into area preservation of lone holes.
+        new_holes = []
+        for part in parts:
+            if not isinstance(part, Polygon):
+                continue
+            members = [
+                h for h, b in zip(holes, buffered, strict=True) if b.intersects(part)
+            ]
+            new_holes.append(members[0] if len(members) == 1 else part)
+        holes = new_holes
 
     smooth_polygon = _smoothify_geometry(
         geom=filled_polygon,
@@ -190,16 +295,30 @@ def _smoothify_polygon(
             if isinstance(smooth_hole, Polygon):
                 smoothed_hole_polygons.append(smooth_hole)
 
-        # Use difference to subtract holes, ensuring they don't add area
-        # even if they extend outside the smoothed exterior
+        # Subtract all holes in one difference call; parts of a hole lying
+        # outside the smoothed exterior are ignored by difference, so they
+        # cannot add area
         if smoothed_hole_polygons:
-            # Intersect each hole with the smooth_polygon first to ensure
-            # we only subtract the portion that's actually inside
-            for hole_poly in smoothed_hole_polygons:
-                # Only subtract the part of the hole that's inside the polygon
-                hole_inside = smooth_polygon.intersection(hole_poly)
-                if not hole_inside.is_empty:
-                    smooth_polygon = smooth_polygon.difference(hole_inside)
+            smooth_polygon = smooth_polygon.difference(
+                unary_union(smoothed_hole_polygons)
+            )
+            # A smoothed hole can cross the independently smoothed exterior;
+            # the difference then clips it, leaving sharp concave cusps at
+            # the (often tangential) crossing points. Repair with a small
+            # opening (erode-dilate: removes hair-thin material needles
+            # between hole rim and boundary) followed by a closing
+            # (dilate-erode: seals thin slits) — both deviate at most their
+            # radius and only at sub-smoothing-scale features.
+            if _max_concave_turn_degrees(smooth_polygon) > 60:
+                radius = segment_length / 4
+                repaired = (
+                    smooth_polygon.buffer(-radius)
+                    .buffer(radius)
+                    .buffer(radius)
+                    .buffer(-radius)
+                )
+                if not repaired.is_empty:
+                    smooth_polygon = make_valid(repaired)
 
     return cast("Polygon | MultiPolygon", smooth_polygon)
 
@@ -262,6 +381,7 @@ def _smoothify_geodataframe(
     preserve_area: bool,
     area_tolerance: float = 0.01,
     merge_field: Optional[str] = None,
+    merge_holes: bool = True,
 ) -> gpd.GeoDataFrame:
     """Smooth all geometries in a GeoDataFrame with optional parallel processing.
 
@@ -289,7 +409,12 @@ def _smoothify_geodataframe(
         if polygon_mask.any():
             # Process polygons
             polygon_gdf = modified_gdf[polygon_mask].copy()
-            polygon_gdf.geometry = polygon_gdf.buffer(segment_length / 1000)
+            # Mitre join keeps corners as single vertices (round joins add ~8
+            # vertices per corner, inflating the dissolve union for no visible
+            # gain at this tiny buffer distance)
+            polygon_gdf.geometry = polygon_gdf.buffer(
+                segment_length / 1000, join_style="mitre"
+            )
             polygon_gdf = polygon_gdf.dissolve(by=merge_field)
             if merge_field is not None:
                 polygon_gdf = polygon_gdf.reset_index()
@@ -312,19 +437,20 @@ def _smoothify_geodataframe(
         merge_multipolygons=merge_multipolygons,
         preserve_area=preserve_area,
         area_tolerance=area_tolerance,
+        merge_holes=merge_holes,
     )
 
-    smoothed: list[BaseGeometry]
-    if num_cores == 1:
-        smoothed = [smoothify_partial(geom) for geom in modified_gdf.geometry]
-    else:
-        smoothed = cast(
+    def run_batch(geoms: list[BaseGeometry]) -> list[BaseGeometry]:
+        if num_cores == 1:
+            return [smoothify_partial(g) for g in geoms]
+        return cast(
             "list[BaseGeometry]",
-            Parallel(n_jobs=num_cores)(
-                delayed(smoothify_partial)(geom) for geom in modified_gdf.geometry
-            ),
+            Parallel(n_jobs=num_cores)(delayed(smoothify_partial)(g) for g in geoms),
         )
-    modified_gdf.geometry = smoothed
+
+    modified_gdf.geometry = _smooth_deduplicated(
+        list(modified_gdf.geometry), run_batch
+    )
 
     # Re-attach any invalid geometries that were set aside, unchanged, so the
     # output still has a row for every input feature.
@@ -344,6 +470,7 @@ def _smoothify_single(
     merge_multipolygons: bool,
     preserve_area: bool,
     area_tolerance: float = 0.01,
+    merge_holes: bool = True,
 ) -> BaseGeometry:
     """Smooth a single geometry by dispatching to the appropriate type-specific function.
 
@@ -376,6 +503,7 @@ def _smoothify_single(
             smooth_iterations=smooth_iterations,
             preserve_area=preserve_area,
             area_tolerance=area_tolerance,
+            merge_holes=merge_holes,
         )
     elif isinstance(geom, LinearRing):
         return _smoothify_linearing(
@@ -399,6 +527,7 @@ def _smoothify_single(
             merge_multipolygons=merge_multipolygons,
             preserve_area=preserve_area,
             area_tolerance=area_tolerance,
+            merge_holes=merge_holes,
         )
     elif isinstance(geom, MultiLineString):
         return _smoothify_multilinestring(
@@ -419,6 +548,7 @@ def _smoothify_bulk(
     merge_multipolygons: bool,
     preserve_area: bool,
     area_tolerance: float = 0.01,
+    merge_holes: bool = True,
 ) -> GeometryCollection | MultiPolygon | MultiLineString:
     """Smooth a collection of geometries using parallel processing.
 
@@ -460,14 +590,19 @@ def _smoothify_bulk(
         merge_multipolygons=merge_multipolygons,
         preserve_area=preserve_area,
         area_tolerance=area_tolerance,
+        merge_holes=merge_holes,
     )
-    if num_cores == 1:
-        geom_smoothed = list(map(smoothify_partial, geom.geoms))
-    else:
-        # Use spawn to avoid fork warnings in multi-threaded environments (Python 3.13+)
+
+    def run_batch(geoms: list[BaseGeometry]) -> list[BaseGeometry]:
+        if num_cores == 1:
+            return [smoothify_partial(g) for g in geoms]
+        # Use spawn to avoid fork warnings in multi-threaded environments
+        # (Python 3.13+)
         ctx = get_context("spawn")
         with ctx.Pool(num_cores) as pool:
-            geom_smoothed = pool.map(smoothify_partial, geom.geoms)
+            return pool.map(smoothify_partial, geoms)
+
+    geom_smoothed = _smooth_deduplicated(list(geom.geoms), run_batch)
 
     # Re-attach untouched invalid geometries so every input is represented.
     geom_smoothed = list(geom_smoothed) + invalid_geoms
@@ -513,8 +648,6 @@ def _auto_detect_segment_length(
         Samples up to max_samples segments to find the shortest one.
         For pixelated geometries, the minimum segment represents the pixel size.
         """
-        import numpy as np
-
         if geom.is_empty:
             return None
 

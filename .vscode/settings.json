@@ -12,6 +12,7 @@
         "geodataframe",
         "geopandas",
         "gpkg",
+        "hausdorffs",
         "ipykernel",
         "joblib",
         "lightgreen",

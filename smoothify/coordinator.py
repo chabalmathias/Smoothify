@@ -32,6 +32,7 @@ def smoothify(
     merge_collection: bool = True,
     merge_field: None = None,
     merge_multipolygons: bool = True,
+    merge_holes: bool = True,
     preserve_area: bool = True,
     area_tolerance: float = 0.01,
 ) -> BaseGeometry: ...
@@ -46,6 +47,7 @@ def smoothify(
     merge_collection: bool = True,
     merge_field: None = None,
     merge_multipolygons: bool = True,
+    merge_holes: bool = True,
     preserve_area: bool = True,
     area_tolerance: float = 0.01,
 ) -> BaseGeometry: ...
@@ -60,6 +62,7 @@ def smoothify(
     merge_collection: bool = True,
     merge_field: Optional[str] = None,
     merge_multipolygons: bool = True,
+    merge_holes: bool = True,
     preserve_area: bool = True,
     area_tolerance: float = 0.01,
 ) -> gpd.GeoDataFrame: ...
@@ -73,6 +76,7 @@ def smoothify(
     merge_collection: bool = True,
     merge_field: Optional[str] = None,
     merge_multipolygons: bool = True,
+    merge_holes: bool = True,
     preserve_area: bool = True,
     area_tolerance: float = 0.01,
 ) -> BaseGeometry | Sequence[BaseGeometry] | gpd.GeoDataFrame:
@@ -110,6 +114,10 @@ def smoothify(
             Only applies when merge_collection=True.
         merge_multipolygons: Whether to merge adjacent polygons within MultiPolygons
             before smoothing.
+        merge_holes: Whether to merge holes (interior rings) that touch or
+            nearly touch — e.g. diagonally adjacent raster cells — before
+            smoothing, so they smooth into one coherent opening instead of
+            separate overlapping shapes.
         preserve_area: Whether to restore original area after smoothing via buffering.
             Applied to Polygons only.
         area_tolerance: Percentage of original area allowed as error
@@ -179,6 +187,7 @@ def smoothify(
             smooth_iterations=smooth_iterations,
             merge_collection=merge_collection,
             merge_multipolygons=merge_multipolygons,
+            merge_holes=merge_holes,
             preserve_area=preserve_area,
             area_tolerance=area_tolerance,
         )
@@ -188,6 +197,7 @@ def smoothify(
             segment_length=segment_length,
             smooth_iterations=smooth_iterations,
             merge_multipolygons=merge_multipolygons,
+            merge_holes=merge_holes,
             preserve_area=preserve_area,
             area_tolerance=area_tolerance,
         )
@@ -199,6 +209,7 @@ def smoothify(
             smooth_iterations=smooth_iterations,
             merge_collection=merge_collection,
             merge_multipolygons=merge_multipolygons,
+            merge_holes=merge_holes,
             preserve_area=preserve_area,
             area_tolerance=area_tolerance,
             merge_field=merge_field,

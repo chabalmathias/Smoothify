@@ -184,3 +184,6 @@ smoothify/_version.py
 
 # uv lockfile (not tracked — library, resolve fresh)
 uv.lock
+
+# Benchmarks
+benchmarks/baseline_output.gpkg

@@ -14,6 +14,13 @@ from shapely.geometry import (
 from shapely.geometry.base import BaseGeometry
 from shapely.ops import unary_union
 
+# Chaikin's corner cut moves a right-angle vertex inward by ~1/4 of the
+# adjacent segment length, so smoothing segments of FACTOR * segment_length
+# deviates at most ~segment_length at a right angle — the same deviation
+# budget the simplify(segment_length) step already allows — while letting
+# shallow facet chains (e.g. simplified curves) blend into smooth curves.
+_CHAIKIN_SEGMENT_FACTOR = 4
+
 
 def _chaikin_corner_cutting(
     geom: Polygon | LineString, num_iterations: int = 1, reverse: bool = False
@@ -69,6 +76,40 @@ def _chaikin_corner_cutting(
         points = points[::-1]
 
     return LineString(points) if isinstance(geom, LineString) else Polygon(points)
+
+
+def _max_concave_turn_degrees(geom: BaseGeometry) -> float:
+    """Sharpest concave (inward) turn angle in degrees across all rings.
+
+    A correctly smoothed polygon is everywhere gently curved on the concave
+    side; thin features may legitimately end in sharp convex hairpins, but a
+    sharp concave turn means a fold/slit (e.g. from smoothing variants that
+    disagreed about a feature near the simplify tolerance)."""
+
+    polys = geom.geoms if isinstance(geom, MultiPolygon) else [geom]
+    worst = 0.0
+    for poly in polys:
+        if not isinstance(poly, Polygon):
+            continue
+        for ring in [poly.exterior, *poly.interiors]:
+            coords = np.asarray(ring.coords)[:-1, :2]
+            if len(coords) < 4:
+                continue
+            vectors = np.diff(np.vstack([coords, coords[:2]]), axis=0)
+            cross = vectors[:-1, 0] * vectors[1:, 1] - vectors[:-1, 1] * vectors[1:, 0]
+            dot = (vectors[:-1] * vectors[1:]).sum(axis=1)
+            # Shoelace sign gives ring orientation; turns with cross sign
+            # opposite to it are concave (material on the inside of the bend)
+            orientation = np.sign(
+                np.dot(coords[:, 0], np.roll(coords[:, 1], -1))
+                - np.dot(coords[:, 1], np.roll(coords[:, 0], -1))
+            )
+            concave = cross * orientation < 0
+            if not concave.any():
+                continue
+            angles = np.degrees(np.arctan2(np.abs(cross[concave]), dot[concave]))
+            worst = max(worst, float(angles.max()))
+    return worst
 
 
 def _rotate_ring_coords(ring: LinearRing, shift: float) -> "npt.NDArray[np.float64]":
@@ -174,16 +215,29 @@ def _preserve_area_with_buffer(
     perimeter = polygon.length
     initial_guess = (target_area - current_area) / perimeter if perimeter > 0 else 0
 
+    # Cache evaluations: brentq re-evaluates the bracket endpoints, and
+    # buffer(0) at the known endpoint costs a full (pointless) GEOS buffer.
+    _cache: dict[float, float] = {0.0: current_area - target_area}
+
     def area_delta(distance: float) -> float:
-        buffered_polygon = polygon.buffer(distance)
-        return float(buffered_polygon.area - target_area)
+        cached = _cache.get(distance)
+        if cached is not None:
+            return cached
+        result = float(polygon.buffer(distance).area - target_area)
+        _cache[distance] = result
+        return result
 
-    scale = (
-        abs(initial_guess) * 2 if initial_guess != 0 else (polygon.area / 3.1416) ** 0.5
-    )
-    max_distance = max(0.1, scale)
+    # Buffered area is monotonic in distance and f(0) = current - target is
+    # known for free, so bracket one-sided from the linear estimate instead
+    # of buffering both sides of a symmetric interval.
+    if initial_guess != 0:
+        far = initial_guess * 1.2
+        lo, hi = (0.0, far) if far > 0 else (far, 0.0)
+    else:
+        scale = (polygon.area / 3.1416) ** 0.5
+        max_distance = max(0.1, scale)
+        lo, hi = -max_distance, max_distance
 
-    lo, hi = -max_distance, max_distance
     f_lo, f_hi = area_delta(lo), area_delta(hi)
 
     for _ in range(20):
@@ -194,10 +248,13 @@ def _preserve_area_with_buffer(
         f_lo, f_hi = area_delta(lo), area_delta(hi)
 
     try:
-        # Use brentq to find optimal buffer distance
-        # xtol controls precision of buffer distance finding, not area precision
-        # Use a reasonable xtol relative to the search space
-        xtol = min(tolerance * 0.01, (hi - lo) * 0.001)
+        # Use brentq to find optimal buffer distance.
+        # xtol is in distance units while tolerance is in area units; since
+        # d(area)/d(distance) ~= perimeter, a distance error of
+        # tolerance / perimeter corresponds to an area error of ~tolerance.
+        # Aim an order of magnitude below that so the verification below
+        # rarely needs a second pass.
+        xtol = tolerance / perimeter * 0.1 if perimeter > 0 else (hi - lo) * 0.001
         optimal_distance = cast(float, brentq(area_delta, lo, hi, xtol=xtol))
         result = polygon.buffer(optimal_distance)
 
@@ -249,7 +306,9 @@ def _join_adjacent(
         # If the geometry is not a polygon type, return it unchanged
         return geom_combined
 
-    merged_geom = geom_combined.buffer(segment_length / 1000)
+    # Mitre join keeps corners as single vertices (round joins add ~8 vertices
+    # per corner, inflating the union for no visible gain at this tiny buffer)
+    merged_geom = geom_combined.buffer(segment_length / 1000, join_style="mitre")
     merged_geom = unary_union(merged_geom)
 
     if other_types:
@@ -270,10 +329,14 @@ def _smoothify_geometry(
     This is the main smoothing algorithm that:
     1. Adds intermediate vertices along line segments (segmentize)
     2. Generates multiple rotated variants (for Polygons) to avoid artifacts
-    3. Simplifies each variant to remove noise
+    3. Simplifies each variant to remove noise, then re-segmentizes so no
+       segment exceeds segment_length * _CHAIKIN_SEGMENT_FACTOR (simplify
+       strips collinear vertices, and Chaikin's corner cuts scale with
+       segment length — unbounded segments would over-round sharp corners)
     4. Applies Chaikin corner cutting to smooth
     5. Merges all variants via union to eliminate start-point artifacts
-    6. Applies final smoothing pass
+    6. Simplifies the merged result and re-segmentizes again, then applies
+       a final smoothing pass
     7. Optionally restores original area via buffering (for Polygons)"""
 
     if geom.geom_type == "Polygon":
@@ -292,24 +355,38 @@ def _smoothify_geometry(
             geom_segmented, n_starting_points=4
         )
         for moved_start in starting_point_geoms:
+            # Simplify strips noise below segment_length, but on straight edges
+            # it also strips every densified vertex, leaving arbitrarily long
+            # segments. Chaikin cuts corners at 1/4 of each segment's length,
+            # so re-segmentize afterwards to cap the rounding at segment_length
+            # scale.
             moved_start = moved_start.simplify(
                 tolerance=segment_length,
                 preserve_topology=True,
-            )
+            ).segmentize(segment_length * _CHAIKIN_SEGMENT_FACTOR)
             moved_start = cast(Polygon, moved_start)
-            for reverse in [False, True]:
-                smoothed = _chaikin_corner_cutting(
-                    geom=moved_start,
-                    num_iterations=smooth_iterations,
-                    reverse=reverse,
-                )
-                geom_iterations.append(smoothed)
+            # No reversed pass: on closed rings Chaikin is direction-invariant
+            # (each edge {a, b} yields the same cut points 0.75a + 0.25b and
+            # 0.25a + 0.75b either way), so a reversed variant duplicates the
+            # forward one bit-for-bit and only inflates the union below.
+            #
+            # Cap pre-union iterations at 2: the merged result is simplified
+            # at segment_length / 5 below, which erases detail finer than
+            # iteration 3+ adds (cuts beyond iteration 2 move the boundary by
+            # less than that tolerance), while each extra iteration doubles
+            # the vertex count entering the expensive union. The final
+            # post-union pass still runs the full smooth_iterations.
+            smoothed = _chaikin_corner_cutting(
+                geom=moved_start,
+                num_iterations=min(smooth_iterations, 2),
+            )
+            geom_iterations.append(smoothed)
 
     else:
         moved_start = geom_segmented.simplify(
             tolerance=segment_length,
             preserve_topology=True,
-        )
+        ).segmentize(segment_length * _CHAIKIN_SEGMENT_FACTOR)
         moved_start = cast(LineString, moved_start)
         smoothed = _chaikin_corner_cutting(
             geom=moved_start,
@@ -317,10 +394,13 @@ def _smoothify_geometry(
         )
         geom_iterations.append(smoothed)
 
+    dissolved: BaseGeometry | None = None
     if isinstance(geom, Polygon):
         geom_iterations = [make_valid(g) for g in geom_iterations]
 
-        dissolved_poly = make_valid(unary_union(geom_iterations)).simplify(
+        dissolved = make_valid(unary_union(geom_iterations))
+
+        dissolved_poly = dissolved.simplify(
             tolerance=segment_length / 5,
             preserve_topology=True,
         )
@@ -342,23 +422,62 @@ def _smoothify_geometry(
         f"Resulting geometry must be Polygon or LineString. Got {type(dissolved_poly)}."
     )
 
+    # The simplify above can again leave long segments on straight stretches
+    # (a Chaikin-rounded corner deviates < segment_length / 5 from the sharp
+    # original, so simplify removes it entirely); re-segmentize so the final
+    # Chaikin pass cannot re-round at a larger scale.
+    dissolved_poly = dissolved_poly.segmentize(segment_length * _CHAIKIN_SEGMENT_FACTOR)
+
     smoothed_geom = _chaikin_corner_cutting(
         geom=dissolved_poly,
         num_iterations=smooth_iterations,
     )
-    if (
-        original_area is not None
-        and isinstance(smoothed_geom, Polygon)
-        and preserve_area
-    ):
-        # Convert percentage to absolute tolerance based on original area
-        # area_tolerance is percentage (e.g., 0.01 = 0.01% error = 99.99% preservation)
-        absolute_tolerance = original_area * (area_tolerance / 100.0)
 
-        smoothed_geom = _preserve_area_with_buffer(
-            polygon=smoothed_geom,
-            target_area=original_area,
-            tolerance=absolute_tolerance,
+    def finish(candidate: Polygon | LineString) -> Polygon | LineString:
+        """Apply the optional area-preservation step to a smoothed result."""
+        if (
+            original_area is not None
+            and isinstance(candidate, Polygon)
+            and preserve_area
+        ):
+            # Convert percentage to absolute tolerance based on original area
+            # (e.g. area_tolerance 0.01 = 0.01% error = 99.99% preservation)
+            absolute_tolerance = original_area * (area_tolerance / 100.0)
+            return _preserve_area_with_buffer(
+                polygon=candidate,
+                target_area=original_area,
+                tolerance=absolute_tolerance,
+            )
+        return candidate
+
+    smoothed_geom = finish(smoothed_geom)
+
+    # Variants can disagree about features near the simplify tolerance (e.g.
+    # arms ~one segment_length wide collapse differently per start anchor);
+    # their union then carries a forked slit that survives as a fold, which
+    # the area-preservation shrink can sharpen further into a cusp. A
+    # correctly smoothed result is gently curved on the concave side (thin
+    # arms may end in legitimate sharp convex hairpins), so on a sharp
+    # concave turn redo the final pass with a small closing (dilate-erode)
+    # sealing the union — it deviates at most its radius and only at
+    # high-curvature concave spots.
+    if (
+        dissolved is not None
+        and isinstance(smoothed_geom, Polygon)
+        and _max_concave_turn_degrees(smoothed_geom) > 60
+    ):
+        radius = segment_length / 4
+        sealed = make_valid(dissolved.buffer(radius).buffer(-radius)).simplify(
+            tolerance=segment_length / 5,
+            preserve_topology=True,
         )
+        if isinstance(sealed, MultiPolygon):
+            sealed = max(sealed.geoms, key=lambda x: x.area)
+        if isinstance(sealed, Polygon):
+            resmoothed = _chaikin_corner_cutting(
+                geom=sealed.segmentize(segment_length * _CHAIKIN_SEGMENT_FACTOR),
+                num_iterations=smooth_iterations,
+            )
+            smoothed_geom = finish(resmoothed)
 
     return smoothed_geom

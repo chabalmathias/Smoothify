@@ -28,7 +28,7 @@ Polygons and lines derived from classified raster data (e.g., ML model predictio
 Smoothify applies an optimized implementation of Chaikin's corner-cutting algorithm along with other geometric processing to create smooth, natural-looking features while:
 
 - Preserving the general shape and area of polygons
-- Supporting all shapley geometry types
+- Supporting all shapely geometry types
 - Handling shapes with interior holes
 - Efficiently processing large datasets with multiprocessing
 
@@ -85,6 +85,7 @@ Example notebooks:
 - [Usage examples](https://github.com/DPIRD-DMA/Smoothify/blob/main/examples/usage_examples.ipynb)
 - [Smoothify vs. Shapely comparison](https://github.com/DPIRD-DMA/Smoothify/blob/main/examples/smoothify_vs_shapely_comparison.ipynb)
 - [Real-world water example](https://github.com/DPIRD-DMA/Smoothify/blob/main/examples/real_world_water_example.ipynb)
+- [Merging holes](https://github.com/DPIRD-DMA/Smoothify/blob/main/examples/merge_holes_examples.ipynb)
 
 
 ### Basic Polygon Smoothing
@@ -189,6 +190,7 @@ smoothed = smoothify(
 | `merge_collection` | bool | True | Whether to merge/dissolve adjacent geometries in collections before smoothing |
 | `merge_field` | str | None | **GeoDataFrame only**: Column name to use for dissolving geometries. Only valid when `merge_collection=True`. If None, dissolves all geometries together. If specified, dissolves geometries grouped by the column values |
 | `merge_multipolygons` | bool | True | Whether to merge adjacent polygons within MultiPolygons before smoothing |
+| `merge_holes` | bool | True | Whether to join holes that touch or nearly touch (e.g. diagonally adjacent raster cells) before smoothing, so they smooth into one coherent opening instead of separate overlapping shapes |
 | `preserve_area` | bool | True | Whether to restore original area after smoothing via buffering (applies to Polygons only) |
 | `area_tolerance` | float | 0.01 | Percentage of original area allowed as error (e.g., 0.01 = 0.01% error = 99.99% preservation). Only affects Polygons when preserve_area=True |
 
@@ -196,14 +198,20 @@ smoothed = smoothify(
 
 Smoothify uses an advanced multi-step smoothing pipeline:
 
+<p align="left">
+  <img src="https://raw.githubusercontent.com/DPIRD-DMA/Smoothify/main/images/pipeline_steps.png" alt="Smoothify pipeline steps" width="800">
+</p>
 
-1. Adds intermediate vertices along line segments (segmentize)
-2. Generates multiple rotated variants (for Polygons) to avoid artifacts
-3. Simplifies each variant to remove noise
-4. Applies Chaikin corner cutting to smooth
-5. Merges all variants via union to eliminate start-point artifacts
-6. Applies final smoothing pass
-7. Optionally restores original area via buffering (for Polygons)
+
+1. Joins touching holes (for Polygons, when `merge_holes=True`) so they smooth as one opening
+2. Adds intermediate vertices along line segments (segmentize)
+3. Generates multiple rotated variants (for Polygons) to avoid artifacts
+4. Simplifies each variant to remove noise
+5. Applies Chaikin corner cutting to smooth
+6. Merges all variants via union to eliminate start-point artifacts
+7. Applies final smoothing pass
+8. Optionally restores original area via buffering (for Polygons)
+9. Detects and repairs any sharp folds left by features near the smoothing scale (e.g. one-pixel-wide arms), using a small morphological opening/closing bounded at `segment_length / 4`
 
 ## Invalid Geometries
 
@@ -224,9 +232,10 @@ smoothed = smoothify(make_valid(polygon), segment_length=1.0)
 ## Performance Considerations
 
 - **Parallel Processing**: For large GeoDataFrames or collections, use `num_cores` = 0 to enable parallel processing
+- **Duplicate Shapes**: Geometries that are translated copies of the same shape (common in raster-derived data, e.g. single-pixel polygons) are automatically smoothed once and the result reused
 - **Smoothing Iterations**: Values of 3-5 typically provide good results. Higher values create smoother output but increase processing time and vertex count
 - **Memory Usage**: Scales with geometry complexity. The algorithm creates multiple variants during smoothing
-- **Optimal segment_length**: Should match the original raster cell size (pixel size) or be slightly larger for best results
+- **Optimal segment_length**: Anything from about half the original raster pixel size and up should produce reasonable output — larger values produce more rounded output, smaller values stay more faithful to the original geometry
 
 ## Running the Tests
 
