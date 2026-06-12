@@ -25,9 +25,7 @@ class TestCongruenceDedup:
     def test_translated_copies_get_translated_results(self):
         base = pixel_blob()
         offsets = [(0, 0), (100, 0), (-50, 75), (1234.5, -987.25)]
-        gdf = gpd.GeoDataFrame(
-            geometry=[translate(base, dx, dy) for dx, dy in offsets]
-        )
+        gdf = gpd.GeoDataFrame(geometry=[translate(base, dx, dy) for dx, dy in offsets])
 
         # merge_collection=False keeps output rows aligned 1:1 with input
         # (the dissolve+explode path does not preserve row order)

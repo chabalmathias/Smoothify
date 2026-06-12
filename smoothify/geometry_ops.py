@@ -112,9 +112,7 @@ def _smooth_deduplicated(
         # coordinate memory on large GeoDataFrames of distinct shapes. A
         # 16-byte BLAKE2b digest makes key memory independent of geometry
         # size (collision odds ~1e-24).
-        digest = hashlib.blake2b(
-            (coords - mins).tobytes(), digest_size=16
-        ).digest()
+        digest = hashlib.blake2b((coords - mins).tobytes(), digest_size=16).digest()
         key = (geom.geom_type, int(n_rings), digest)
         rep_pos = key_to_rep.get(key)
         if rep_pos is None:
@@ -448,9 +446,7 @@ def _smoothify_geodataframe(
             Parallel(n_jobs=num_cores)(delayed(smoothify_partial)(g) for g in geoms),
         )
 
-    modified_gdf.geometry = _smooth_deduplicated(
-        list(modified_gdf.geometry), run_batch
-    )
+    modified_gdf.geometry = _smooth_deduplicated(list(modified_gdf.geometry), run_batch)
 
     # Re-attach any invalid geometries that were set aside, unchanged, so the
     # output still has a row for every input feature.
