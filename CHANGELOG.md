@@ -4,6 +4,8 @@ All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
 
+## [0.3.0] - 2026-06-12
+
 ### Changed
 - Single-core smoothing is ~3.5x faster on typical raster-derived data (benchmarked on `examples/Water.gpkg`: 6.8s → 1.9s, including the cost of the new fold-repair check below). Output differences are sub-pixel (bounded by the algorithm's own start-point noise floor); area preservation accuracy is unchanged or slightly better. The main changes:
   - Removed the reversed-direction smoothing variants for polygons: Chaikin corner cutting is direction-invariant on closed rings, so they duplicated the forward variants bit-for-bit and only inflated the variant union (output unchanged).
