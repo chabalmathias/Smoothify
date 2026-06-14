@@ -14,6 +14,8 @@ from shapely.geometry import (
 from shapely.geometry.base import BaseGeometry
 from shapely.ops import unary_union
 
+from ._chaikin import _chaikin
+
 # Chaikin's corner cut moves a right-angle vertex inward by ~1/4 of the
 # adjacent segment length, so smoothing segments of FACTOR * segment_length
 # deviates at most ~segment_length at a right angle — the same deviation
@@ -40,33 +42,11 @@ def _chaikin_corner_cutting(
     if is_closed:
         # Remove duplicate endpoint for closed rings
         points = points[:-1]
-        endpoints = None
-    else:
-        # Store endpoints for open linestrings
-        endpoints = (points[0], points[-1])
 
     if reverse:
         points = points[::-1]
 
-    for _ in range(num_iterations):
-        # Get point pairs for corner cutting
-        if is_closed:
-            p0 = points
-            p1 = np.roll(points, -1, axis=0)
-        else:
-            p0 = points[:-1]
-            p1 = points[1:]
-
-        # Vectorized smoothing at 1/4 and 3/4 positions
-        # Pre-allocate result array for better performance
-        n_new_points = len(p0) * 2
-        points = np.empty((n_new_points, points.shape[1]), dtype=np.float64)
-        points[0::2] = 0.75 * p0 + 0.25 * p1  # q points
-        points[1::2] = 0.25 * p0 + 0.75 * p1  # r points
-
-        # Restore endpoints for open linestrings
-        if endpoints is not None:
-            points = np.vstack([endpoints[0], points, endpoints[1]])
+    points = _chaikin(points, num_iterations, is_closed)
 
     # Add closing point for polygons
     if is_closed:
