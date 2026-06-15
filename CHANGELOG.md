@@ -4,6 +4,12 @@ All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
 
+## [0.3.1] - 2026-06-15
+
+### Fixed
+- Fixed an `AssertionError` crash (`Resulting geometry must be Polygon or LineString. Got <GeometryCollection>`) when smoothing certain valid thin/staircase polygons only a few `segment_length`s across. A rotated start-point variant could self-intersect after simplify + Chaikin where it rounds a neck about one `segment_length` wide; `make_valid()` then repaired that variant into a polygon *plus* a zero-area line filament at the pinch, and `unary_union` kept the 1-D debris, so the variant union became a `GeometryCollection` the rest of the pipeline could not handle. Zero-area debris is now stripped from each repaired variant before the union, so the result stays a clean, valid `Polygon`.
+- Improved the sharp-concave-fold repair (introduced in 0.3.0) for thin features that shed significant area during smoothing. The closing (dilate-erode) seal now operates on the area-preserved result and restores area again afterwards, instead of sealing the area-deficient pre-buffer variant union — which the area-preservation buffer could then re-expand into the same cusp. This reduces residual folds on narrow arms.
+
 ## [0.3.0] - 2026-06-12
 
 ### Changed

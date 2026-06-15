@@ -317,6 +317,22 @@ def _join_adjacent(
     return merged_geom
 
 
+def _polygonal_only(geom: BaseGeometry) -> BaseGeometry:
+    """Keep only the polygonal (area-bearing) parts of a geometry.
+
+    A rotated start-point variant can self-intersect after simplify + Chaikin
+    where it rounds a neck only ~segment_length wide so the two sides cross.
+    make_valid() then repairs it into a Polygon *plus* a zero-area line filament
+    at the pinch point. Those 1-D pieces carry no area, but unary_union keeps
+    them, so the variant union leaks through as a GeometryCollection (which the
+    rest of the pipeline can't handle). Drop them so the union stays polygonal.
+    """
+    if isinstance(geom, GeometryCollection):
+        polys = [g for g in geom.geoms if isinstance(g, (Polygon, MultiPolygon))]
+        return unary_union(polys) if polys else Polygon()
+    return geom
+
+
 def _smoothify_geometry(
     geom: Polygon | LineString,
     segment_length: float,
@@ -394,9 +410,11 @@ def _smoothify_geometry(
         )
         geom_iterations.append(smoothed)
 
-    dissolved: BaseGeometry | None = None
     if isinstance(geom, Polygon):
-        geom_iterations = [make_valid(g) for g in geom_iterations]
+        # A self-intersecting Chaikin variant repairs (via make_valid) into a
+        # polygon plus zero-area line debris; keep only the area so the union
+        # below stays polygonal.
+        geom_iterations = [_polygonal_only(make_valid(g)) for g in geom_iterations]
 
         dissolved = make_valid(unary_union(geom_iterations))
 
@@ -452,22 +470,25 @@ def _smoothify_geometry(
 
     smoothed_geom = finish(smoothed_geom)
 
-    # Variants can disagree about features near the simplify tolerance (e.g.
-    # arms ~one segment_length wide collapse differently per start anchor);
-    # their union then carries a forked slit that survives as a fold, which
-    # the area-preservation shrink can sharpen further into a cusp. A
-    # correctly smoothed result is gently curved on the concave side (thin
-    # arms may end in legitimate sharp convex hairpins), so on a sharp
-    # concave turn redo the final pass with a small closing (dilate-erode)
-    # sealing the union — it deviates at most its radius and only at
-    # high-curvature concave spots.
+    # Thin features fold in two ways that both surface as a sharp concave turn:
+    # variants disagree about an arm ~one segment_length wide and their union
+    # carries a forked slit, and — more severely — smoothing collapses such an
+    # arm (it can shed ~40% of its area), so the area-preservation buffer above
+    # has to expand it a long way and a large uniform outward buffer sharpens
+    # the inner corner where arms meet into a fold/cusp. A correctly smoothed
+    # result is gently curved on the concave side (thin arms may end in
+    # legitimate sharp convex hairpins), so on a sharp concave turn fill that
+    # notch with a small closing (dilate-erode), re-smooth, and restore area
+    # again. Seal the area-preserved result rather than the pre-buffer union:
+    # by now it already sits at target area, so this second area pass barely
+    # moves the boundary and cannot re-introduce the fold the way sealing the
+    # area-deficient union would once finish() buffered it back out.
     if (
-        dissolved is not None
-        and isinstance(smoothed_geom, Polygon)
+        isinstance(smoothed_geom, Polygon)
         and _max_concave_turn_degrees(smoothed_geom) > 60
     ):
         radius = segment_length / 4
-        sealed = make_valid(dissolved.buffer(radius).buffer(-radius)).simplify(
+        sealed = make_valid(smoothed_geom.buffer(radius).buffer(-radius)).simplify(
             tolerance=segment_length / 5,
             preserve_topology=True,
         )
