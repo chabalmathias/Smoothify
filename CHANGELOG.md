@@ -4,6 +4,11 @@ All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
 
+## [0.3.2] - 2026-06-30
+
+### Changed
+- Area preservation is faster with no change to output. The buffer-distance search now seeds from the Steiner area expansion `A(d) ≈ A₀ + L·d + π·d²` — solving that quadratic for the initial offset instead of using a linear estimate — and refines with Newton's method using the measured boundary length as the derivative (the rate of area change of an outward offset equals its perimeter), so it no longer brackets the root before solving. This cuts buffer operations per ring from roughly 5–6 to 1–2. On `examples/Water.gpkg` the full single-core pipeline is ~1.3x faster at the default 5 iterations (5.1s → 3.8s), with the speedup scaling up with iteration count and the polygon share of the workload (down to ~1.0x on hole-dominated inputs). Output is unchanged within the area tolerance (per-polygon symmetric difference ≤ 0.005%, area-preservation accuracy identical). Awkward shapes where Newton stalls (pinch-offs or topology changes near the root) fall back to the previous bracketed Brent's-method search, so robustness is unchanged.
+
 ## [0.3.1] - 2026-06-15
 
 ### Fixed
