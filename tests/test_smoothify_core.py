@@ -2,10 +2,13 @@
 
 import pytest
 from shapely.geometry import LineString, Polygon
+from shapely.geometry.base import BaseGeometry
 
+from smoothify import smoothify_core
 from smoothify.smoothify_core import (
     _generate_starting_point_variants,
     _join_adjacent,
+    _preserve_area_brentq,
     _preserve_area_with_buffer,
     _rotate_polygon_start,
     _smoothify_geometry,
@@ -88,6 +91,104 @@ class TestPreserveAreaWithBuffer:
         # Should be close to target area
         assert abs(preserved.area - target_area) < 1e-3
         assert preserved.area < large_polygon.area
+
+    def test_preserve_area_empty(self):
+        """Empty input is returned unchanged."""
+        empty = Polygon()
+        assert _preserve_area_with_buffer(empty, target_area=10.0).is_empty
+
+    def test_preserve_area_concave_shape(self):
+        """Newton path reaches tolerance on a concave (non-convex) polygon."""
+        # L-shape: the pi*d^2 Steiner seed assumes total turning of 2*pi, which
+        # a reflex corner violates, so this exercises the Newton correction.
+        l_shape = Polygon([(0, 0), (10, 0), (10, 4), (4, 4), (4, 10), (0, 10)])
+        for target in (l_shape.area * 1.05, l_shape.area * 0.95):
+            preserved = _preserve_area_with_buffer(
+                l_shape, target_area=target, tolerance=1e-4
+            )
+            assert abs(preserved.area - target) < 1e-4
+
+    def test_preserve_area_uses_few_buffers(self):
+        """The Newton solve should reach tolerance in far fewer buffers than the
+        bracketed fallback would (guards the optimisation against regressions)."""
+        polygon = Polygon([(0, 0), (10, 0), (10, 10), (0, 10)])
+        calls = {"n": 0}
+        original_buffer = BaseGeometry.buffer
+
+        def counting_buffer(self, *args, **kwargs):
+            calls["n"] += 1
+            return original_buffer(self, *args, **kwargs)
+
+        BaseGeometry.buffer = counting_buffer
+        try:
+            preserved = _preserve_area_with_buffer(
+                polygon, target_area=polygon.area * 1.1, tolerance=1e-4
+            )
+        finally:
+            BaseGeometry.buffer = original_buffer
+
+        assert abs(preserved.area - polygon.area * 1.1) < 1e-4
+        assert calls["n"] <= 4
+
+    def test_preserve_area_falls_back_to_brentq(self, monkeypatch):
+        """When Newton is denied any steps the function must still reach
+        tolerance via the bracketed Brent's-method fallback."""
+        monkeypatch.setattr(smoothify_core, "_AREA_NEWTON_MAX_STEPS", 0)
+        polygon = Polygon([(0, 0), (10, 0), (10, 10), (0, 10)])
+        for target in (polygon.area * 1.1, polygon.area * 0.9):
+            preserved = _preserve_area_with_buffer(
+                polygon, target_area=target, tolerance=1e-3
+            )
+            assert abs(preserved.area - target) < 1e-3
+
+    def test_newton_and_brentq_agree(self):
+        """The Newton path and the bracketed fallback land on the same area."""
+        polygon = Polygon([(0, 0), (8, 0), (8, 8), (0, 8)])
+        target = polygon.area * 1.07
+        newton = _preserve_area_with_buffer(polygon, target_area=target, tolerance=1e-4)
+        brentq = _preserve_area_brentq(
+            polygon,
+            target_area=target,
+            tolerance=1e-4,
+            current_area=polygon.area,
+            perimeter=polygon.length,
+        )
+        assert brentq is not None
+        assert abs(newton.area - target) < 1e-4
+        assert abs(brentq.area - target) < 1e-4
+        assert abs(newton.area - brentq.area) < 1e-3
+
+
+class TestPreserveAreaBrentq:
+    """Test suite for the bracketed Brent's-method fallback."""
+
+    def test_brentq_grows_polygon(self):
+        """Fallback expands a polygon to a larger target area."""
+        polygon = Polygon([(0, 0), (5, 0), (5, 5), (0, 5)])
+        result = _preserve_area_brentq(
+            polygon,
+            target_area=100.0,
+            tolerance=1e-3,
+            current_area=polygon.area,
+            perimeter=polygon.length,
+        )
+        assert result is not None
+        assert abs(result.area - 100.0) < 1e-3
+        assert result.area > polygon.area
+
+    def test_brentq_shrinks_polygon(self):
+        """Fallback shrinks a polygon to a smaller target area."""
+        polygon = Polygon([(0, 0), (20, 0), (20, 20), (0, 20)])
+        result = _preserve_area_brentq(
+            polygon,
+            target_area=100.0,
+            tolerance=1e-3,
+            current_area=polygon.area,
+            perimeter=polygon.length,
+        )
+        assert result is not None
+        assert abs(result.area - 100.0) < 1e-3
+        assert result.area < polygon.area
 
 
 class TestJoinAdjacent:

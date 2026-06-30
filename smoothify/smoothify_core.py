@@ -1,3 +1,4 @@
+import math
 from typing import cast
 
 import numpy as np
@@ -193,16 +194,30 @@ def _generate_starting_point_variants(
         )
 
 
+# Most rings land within tolerance in one or two Newton steps; allow a few
+# more for awkward shapes before handing off to the bracketed fallback.
+_AREA_NEWTON_MAX_STEPS = 6
+
+
 def _preserve_area_with_buffer(
     polygon: Polygon,
     target_area: float,
     tolerance: float = 1e-6,
 ) -> Polygon:
-    """Restore original polygon area after smoothing via iterative buffering.
+    """Restore original polygon area after smoothing via buffering.
 
-    Smoothing operations can slightly change polygon area. This function uses
-    Brent's method (root-finding algorithm) to find the optimal buffer distance
-    that restores the original area within the specified tolerance."""
+    Smoothing slightly changes polygon area; this finds the buffer distance that
+    restores the original area to within ``tolerance``.
+
+    The buffered area follows the Steiner expansion ``A(d) ~= A0 + L*d + pi*d^2``
+    (``L`` = perimeter), so we seed the search by solving that quadratic instead
+    of the cruder linear estimate, then refine with Newton's method. The area
+    swept by an outward offset changes at a rate equal to the boundary length
+    (the coarea identity), so each buffered candidate yields a near-exact
+    derivative for free and no bracketing is needed -- typically one or two
+    buffers per ring instead of the half-dozen a bracketed root-find spends.
+    Awkward shapes (pinch-offs, topology changes near the root) fall back to the
+    robust Brent's-method search."""
 
     if polygon.is_empty:
         return polygon
@@ -211,8 +226,63 @@ def _preserve_area_with_buffer(
     if abs(current_area - target_area) <= tolerance:
         return polygon
 
-    # Approximate buffer distance needed (assuming circular shape)
     perimeter = polygon.length
+    if perimeter <= 0:
+        return polygon
+
+    # Seed from the Steiner quadratic pi*d^2 + L*d + (A0 - target) = 0, taking
+    # the root nearest zero. When the parabola never reaches the target (a deep
+    # shrink past its vertex) fall back to the first-order estimate and let
+    # Newton walk in.
+    area_gap = current_area - target_area
+    discriminant = perimeter * perimeter - 4.0 * math.pi * area_gap
+    if discriminant >= 0:
+        distance = (-perimeter + math.sqrt(discriminant)) / (2.0 * math.pi)
+    else:
+        distance = -area_gap / perimeter
+
+    best_result: Polygon | None = None
+    best_error = float("inf")
+    for _ in range(_AREA_NEWTON_MAX_STEPS):
+        candidate = polygon.buffer(distance)
+        candidate_area = candidate.area
+        error = abs(candidate_area - target_area)
+        if error < best_error:
+            best_result, best_error = candidate, error
+        if error <= tolerance:
+            return candidate
+        # dA/dd == boundary length of the current candidate (coarea identity).
+        slope = candidate.length
+        if slope <= 0:
+            break
+        next_distance = distance - (candidate_area - target_area) / slope
+        if not math.isfinite(next_distance):
+            break
+        distance = next_distance
+
+    # Newton stalled before reaching tolerance: defer to the bracketed search,
+    # but keep whichever result is actually closer to the target.
+    fallback = _preserve_area_brentq(
+        polygon, target_area, tolerance, current_area, perimeter
+    )
+    if fallback is not None and abs(fallback.area - target_area) < best_error:
+        return fallback
+    return best_result if best_result is not None else polygon
+
+
+def _preserve_area_brentq(
+    polygon: Polygon,
+    target_area: float,
+    tolerance: float,
+    current_area: float,
+    perimeter: float,
+) -> Polygon | None:
+    """Bracketed Brent's-method area restoration (robust fallback).
+
+    Slower than the Newton path (it brackets the root before solving) but does
+    not rely on a good initial estimate, so it covers shapes where Newton
+    stalls. Returns ``None`` only if no usable buffer could be produced."""
+
     initial_guess = (target_area - current_area) / perimeter if perimeter > 0 else 0
 
     # Cache evaluations: brentq re-evaluates the bracket endpoints, and
